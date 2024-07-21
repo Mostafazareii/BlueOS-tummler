@@ -96,13 +96,13 @@
 
         <v-card>
           <v-card-title
-            class="text-h5 red--text grey lighten-2"
+            class="text-h5 lighten-2"
           >
-            Danger Zone
+            Info
           </v-card-title>
 
-          <v-card-text class="text-h6 ma-6">
-            Updating bootstrap is a <b>dangerous operation</b>, only do that when required and necessary.
+          <v-card-text class="text-h6 text-center mt-6">
+            Updating bootstrap is only recommended between stable versions.
           </v-card-text>
 
           <v-divider />
@@ -116,10 +116,10 @@
             </v-btn>
             <v-spacer />
             <v-btn
-              color="warning"
+              color="primary"
               @click="updateBootstrap"
             >
-              I accept the risks
+              Update
             </v-btn>
           </v-card-actions>
         </v-card>
@@ -221,6 +221,10 @@ export default Vue.extend({
       type: Boolean,
       default: false,
     },
+    enableDelete: {
+      type: Boolean,
+      default: true,
+    },
     deleting: {
       type: Boolean,
       default: false,
@@ -262,7 +266,8 @@ export default Vue.extend({
       return value.replace('sha256:', '').substring(0, 8)
     },
     imageCanBeDeleted() {
-      return (this.image.tag !== 'factory' || this.image.repository !== DEFAULT_REMOTE_IMAGE) && !this.deleting
+      return (this.image.tag !== 'factory' || this.image.repository !== DEFAULT_REMOTE_IMAGE)
+        && !this.deleting && this.enableDelete
     },
     updateBootstrap() {
       this.bootstrapDialog = false

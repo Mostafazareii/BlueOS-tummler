@@ -51,12 +51,31 @@
               <v-col class="virtual-table-cell name-cell">
                 <v-tooltip bottom>
                   <template #activator="{ on }">
-                    <div v-on="on">
+                    <div :style="!item.current ? { color: 'var(--v-warning-base)' } : {}" v-on="on">
                       {{ item.name }}
                     </div>
                   </template>
                   <span>
-                    {{ item.current?.description ?? 'No description provided' }}
+                    {{
+                      item.current
+                        ? item.current?.description ?? 'No description provided'
+                        : 'Parameter not found in Autopilot data, most likely will not be written to the vehicle.'
+                    }}
+                  </span>
+                </v-tooltip>
+              </v-col>
+              <v-col class="virtual-table-cell">
+                <v-tooltip :disabled="!item.current" bottom>
+                  <template #activator="{ on }">
+                    <div
+                      class="large-text-cell"
+                      v-on="on"
+                    >
+                      {{ item.current ? printParamWithUnit(item.current) : 'N/A' }}
+                    </div>
+                  </template>
+                  <span>
+                    {{ item.current ? printParamWithUnit(item.current) : 'N/A' }}
                   </span>
                 </v-tooltip>
               </v-col>
@@ -67,26 +86,11 @@
                       class="large-text-cell"
                       v-on="on"
                     >
-                      {{ prettyNameFromParameter(item.current) }}
+                      {{ item.current ? printParamWithUnit(item.new) : item.new.value }}
                     </div>
                   </template>
                   <span>
-                    {{ prettyNameFromParameter(item.current) }}
-                  </span>
-                </v-tooltip>
-              </v-col>
-              <v-col class="virtual-table-cell">
-                <v-tooltip bottom>
-                  <template #activator="{ on }">
-                    <div
-                      class="large-text-cell"
-                      v-on="on"
-                    >
-                      {{ prettyNameFromParameter(item.new) }}
-                    </div>
-                  </template>
-                  <span>
-                    {{ prettyNameFromParameter(item.new) }}
+                    {{ item.current ? printParamWithUnit(item.new) : item.new.value }}
                   </span>
                 </v-tooltip>
               </v-col>
@@ -148,7 +152,7 @@ import { Dictionary } from 'vue-router'
 
 import mavlink2rest from '@/libs/MAVLink2Rest'
 import autopilot_data from '@/store/autopilot'
-import Parameter, { printParam } from '@/types/autopilot/parameter'
+import { printParamWithUnit } from '@/types/autopilot/parameter'
 
 export default Vue.extend({
   name: 'ParameterLoader',
@@ -294,17 +298,12 @@ export default Vue.extend({
 
         return {
           name,
-          current: currentParameter,
+          current: currentParameter ?? undefined,
           new: { ...currentParameter, value },
         }
       })
     },
-    prettyNameFromParameter(parameter: Parameter) {
-      const paramValueText = printParam(parameter)
-      const paramUnitsText = parameter?.units ? `[${parameter.units}]` : ''
-
-      return paramValueText + paramUnitsText
-    },
+    printParamWithUnit,
   },
 })
 </script>

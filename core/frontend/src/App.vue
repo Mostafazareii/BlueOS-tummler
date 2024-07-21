@@ -53,6 +53,7 @@
         <v-spacer />
         <beacon-tray-menu />
         <health-tray-menu />
+        <gps-tray-menu />
         <theme-tray-menu />
         <system-checker-tray-menu />
         <vehicle-reboot-required-tray-menu />
@@ -60,6 +61,7 @@
         <internet-tray-menu />
         <wifi-tray-menu />
         <ethernet-tray-menu />
+        <cloud-tray-menu v-if="settings.is_dev_mode" />
         <notification-tray-button />
       </v-app-bar>
     </v-card>
@@ -237,7 +239,7 @@
                     dark
                   >
                     <div
-                      v-tooltip="'This is an installed extensions'"
+                      v-tooltip="'This is an installed extension'"
                       class="extension-marker ma-0"
                     >
                       <v-avatar
@@ -294,10 +296,24 @@
         >
           Bootstrap Version: {{ bootstrap_version.split(':')[1] }}
         </span>
+        <!-- eslint-disable vuejs-accessibility/click-events-have-key-events -->
         <span
           id="current-version"
           class="build_info"
-        >Build: {{ build_date }}</span>
+          @click="buildDateClick"
+        >
+          Build: {{ build_date }}
+          <v-btn
+            v-if="settings.is_dev_mode"
+            v-tooltip="'Disable dev mode'"
+            icon
+            @click.stop="settings.is_dev_mode = false"
+          >
+            <v-icon color="primary">
+              mdi-pill
+            </v-icon>
+          </v-btn>
+        </span>
         <span
           class="build_info"
         >
@@ -361,8 +377,10 @@ import ThemeTrayMenu from './components/app/ThemeTrayMenu.vue'
 import VehicleBanner from './components/app/VehicleBanner.vue'
 import VehicleRebootRequiredTrayMenu from './components/app/VehicleRebootRequiredTrayMenu.vue'
 import BeaconTrayMenu from './components/beacon/BeaconTrayMenu.vue'
+import CloudTrayMenu from './components/cloud/CloudTrayMenu.vue'
 import EthernetTrayMenu from './components/ethernet/EthernetTrayMenu.vue'
 import EthernetUpdater from './components/ethernet/EthernetUpdater.vue'
+import GpsTrayMenu from './components/health/GpsTrayMenu.vue'
 import HealthTrayMenu from './components/health/HealthTrayMenu.vue'
 import MavlinkUpdater from './components/mavlink/MavlinkUpdater.vue'
 import NotificationTrayButton from './components/notifications/TrayButton.vue'
@@ -384,8 +402,10 @@ export default Vue.extend({
     'wifi-tray-menu': WifiTrayMenu,
     'wifi-updater': WifiUpdater,
     'ethernet-tray-menu': EthernetTrayMenu,
+    'cloud-tray-menu': CloudTrayMenu,
     'ethernet-updater': EthernetUpdater,
     'health-tray-menu': HealthTrayMenu,
+    'gps-tray-menu': GpsTrayMenu,
     'mavlink-updater': MavlinkUpdater,
     'power-menu': PowerMenu,
     'settings-menu': SettingsMenu,
@@ -420,6 +440,7 @@ export default Vue.extend({
     ],
     selected_widgets: settings.user_top_widgets,
     bootstrap_version: undefined as string|undefined,
+    build_clicks: 0,
   }),
   computed: {
     topWidgetsName(): string[] {
@@ -709,7 +730,15 @@ export default Vue.extend({
       this.backend_offline = backend_offline
     },
     goHome(): void {
-      this.$router.push('/')
+      if (this.$router.currentRoute.path !== '/') {
+        this.$router.push('/')
+      }
+    },
+    buildDateClick(): void {
+      this.build_clicks = (this.build_clicks + 1) % 10
+      if (this.build_clicks === 0) {
+        settings.is_dev_mode = true
+      }
     },
   },
 })

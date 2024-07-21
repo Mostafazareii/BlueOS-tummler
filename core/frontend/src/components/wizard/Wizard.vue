@@ -45,7 +45,7 @@
                 Welcome to BlueOS!
               </div>
               Welcome to BlueOS!
-              In this setup wizard we will guide you through the initial configuration of your vehicle.
+              In this setup wizard we will guide you through the initial configuration of your vehicle,
               including setting up the vehicle name, hostname, and <b>firmware</b>.
               If your vehicle is already set up, you can skip this wizard.
             </v-card>
@@ -68,8 +68,11 @@
             </v-row>
           </v-stepper-content>
           <v-stepper-content step="1">
-            <RequireInternet v-if="step_number === 1" @next="nextStep()" />
-            <v-row class="pa-5">
+            <RequireInternet
+              v-if="step_number === 1"
+              @next="nextStep()"
+            />
+            <v-row class="pa-5 mt-5">
               <v-btn
 
                 color="warning"
@@ -111,7 +114,7 @@
               </v-icon>
             </div>
             <v-row class="pa-5">
-              <v-row class="pl-3 pt-2">
+              <v-row class="pl-3 pt-2 pb-2">
                 <v-btn
                   color="warning darken"
                   class="mr-5"
@@ -152,6 +155,7 @@
               <v-spacer />
               <v-btn
                 color="primary"
+                :disabled="!params"
                 @click="validateParams() && setupConfiguration()"
               >
                 Continue
@@ -295,11 +299,14 @@ const WIZARD_VERSION = 4
 
 const REPOSITORY_ROOT = 'https://docs.bluerobotics.com/Blueos-Parameter-Repository'
 
-const models: Record<string, string> = import.meta.glob('/src/assets/vehicles/models/**', { eager: true })
+const models: Record<string, string> = import.meta.glob('/public/assets/vehicles/models/**', { eager: true })
 
 function get_model(vehicle_name: string, frame_name: string): undefined | string {
-  const release_path = `/src/assets/vehicles/models/${vehicle_name}/${frame_name}.glb`
-  return models?.[release_path] ? release_path : undefined
+  const release_path = `assets/vehicles/models/${vehicle_name}/${frame_name}.glb`
+  if (models[`/public/${release_path}`]) {
+    return `/assets/vehicles/models/${vehicle_name}/${frame_name}.glb`
+  }
+  return undefined
 }
 
 enum ApplyStatus {
@@ -337,11 +344,11 @@ export default Vue.extend({
       step_number: 0,
       sub_model: get_model('sub', 'bluerov'),
       vehicle_name: 'blueos',
-      vehicle_type: Vehicle.Sub,
+      vehicle_type: '' as Vehicle | string,
       vehicle_image: null as string | null,
       // Allow us to check if the user is stuck in retry
       retry_count: 0,
-      params: {} as Dictionary<number>,
+      params: undefined as undefined | Dictionary<number>,
       // Final configuration
       configurations: [] as Configuration[],
       // Vehicle configuration
@@ -481,7 +488,7 @@ export default Vue.extend({
     setupBoat() {
       this.vehicle_type = Vehicle.Rover
       this.vehicle_name = 'BlueBoat'
-      this.vehicle_image = 'assets/vehicles/images/bb120.png'
+      this.vehicle_image = '/assets/vehicles/images/bb120.png'
       this.step_number += 1
 
       this.vehicle_configuration_pages = [
@@ -541,7 +548,7 @@ export default Vue.extend({
     setupROV() {
       this.vehicle_type = Vehicle.Sub
       this.vehicle_name = 'BlueROV'
-      this.vehicle_image = 'assets/vehicles/images/bluerov2.png'
+      this.vehicle_image = '/assets/vehicles/images/bluerov2.png'
       this.step_number += 1
 
       this.vehicle_configuration_pages = [

@@ -301,7 +301,7 @@ export default Vue.extend({
       await back_axios({
         method: 'get',
         url: `${autopilot.API_URL}/available_firmwares`,
-        timeout: 10000,
+        timeout: 30000,
         params: { vehicle: this.chosen_vehicle, board_name: this.chosen_board?.name },
       })
         .then((response) => {
@@ -321,7 +321,6 @@ export default Vue.extend({
     },
     async installFirmware(): Promise<void> {
       this.install_status = InstallStatus.Installing
-      autopilot_data.reset()
       const axios_request_config: AxiosRequestConfig = {
         method: 'post',
         timeout: 180000,
@@ -359,6 +358,7 @@ export default Vue.extend({
         .then(() => {
           this.install_status = InstallStatus.Succeeded
           this.install_result_message = 'Successfully installed new firmware'
+          autopilot_data.reset()
         })
         .catch((error) => {
           this.install_status = InstallStatus.Failed

@@ -34,7 +34,7 @@
               <td v-tooltip="'Inertial Navigation Sensor'">
                 INS
               </td>
-              <td>{{ imu.busType }} {{ imu.bus }}</td>
+              <td>{{ print_bus(imu.busType) }} {{ imu.bus }}</td>
               <td>{{ `0x${imu.address}` }}</td>
               <td>
                 <v-icon
@@ -75,7 +75,7 @@
               <td>
                 {{ compass_description[compass.param] }}
               </td>
-              <td>{{ compass.busType }} {{ compass.bus }}</td>
+              <td>{{ print_bus(compass.busType) }} {{ compass.bus }}</td>
               <td>{{ `0x${compass.address}` }}</td>
               <td>
                 <v-icon
@@ -102,9 +102,21 @@
               <td v-tooltip="'Used to estimate altitude/depth'">
                 {{ get_pressure_type[baro.param] }} Pressure
               </td>
-              <td>{{ baro.busType }} {{ baro.bus }}</td>
+              <td>{{ print_bus(baro.busType) }} {{ baro.bus }}</td>
               <td>{{ `0x${baro.address}` }}</td>
               <td>{{ baro_status[baro.param] }}</td>
+            </tr>
+            <tr
+              v-for="sensor in celsius"
+              :key="sensor.param"
+            >
+              <td><b>{{ sensor.deviceName ?? 'UNKNOWN' }}</b></td>
+              <td v-tooltip="'Used to estimate altitude/depth'">
+                Temperature
+              </td>
+              <td>{{ print_bus(sensor.busType) }} {{ sensor.bus }}</td>
+              <td>{{ `0x${sensor.address}` }}</td>
+              <td>{{ celsius_temperature }} ºC</td>
             </tr>
           </tbody>
         </template>
@@ -121,7 +133,7 @@ import autopilot from '@/store/autopilot_manager'
 import mavlink from '@/store/mavlink'
 import { printParam } from '@/types/autopilot/parameter'
 import { Dictionary } from '@/types/common'
-import decode, { deviceId } from '@/utils/deviceid_decoder'
+import decode, { BUS_TYPE, deviceId } from '@/utils/deviceid_decoder'
 import mavlink_store_get from '@/utils/mavlink'
 
 import { imu_is_calibrated, imu_temperature_is_calibrated } from '../configuration/common'
@@ -143,6 +155,27 @@ export default Vue.extend({
       return autopilot_data.parameterRegex('^BARO.*_DEVID')
         .filter((param) => param.value !== 0)
         .map((parameter) => decode(parameter.name, parameter.value))
+    },
+    // DEV_ID params do not exist yet for temperature sensors, so here we detect the incoming message instead
+    celsius_temperature(): number | undefined {
+      return mavlink_store_get(mavlink, 'SCALED_PRESSURE3.messageData.message.temperature') as number / 100.0
+    },
+    celsius(): deviceId[] {
+      if (!this.celsius_temperature) {
+        return []
+      }
+      return [
+        {
+          bus: 1,
+          paramValue: 0,
+          deviceIdNumber: 0,
+          devtype: 0,
+          busType: BUS_TYPE.I2C,
+          address: '77',
+          deviceName: 'Celsius',
+          param: '-',
+        },
+      ]
     },
     compass_description(): Dictionary<string> {
       const results = {} as Dictionary<string>
@@ -218,14 +251,19 @@ export default Vue.extend({
     imu_temperature_is_calibrated(): Dictionary<{ calibrated: boolean, calibrationTemperature: number }> {
       return imu_temperature_is_calibrated(this.imus, autopilot_data)
     },
+    external_i2c_bus(): number | undefined {
+      return autopilot_data.parameter('BARO_EXT_BUS')?.value
+    },
     is_water_baro(): Dictionary<boolean> {
       const results = {} as Dictionary<boolean>
-      for (const compass of this.compasses) {
-        if (['MS5837', 'MS5611', 'KELLERLD'].includes(compass.deviceName ?? '--')
-        && autopilot.vehicle_type === 'Submarine') {
-          results[compass.param] = true
+      for (const baro of this.baros) {
+        if (['MS5837', 'MS5611', 'KELLERLD'].includes(baro.deviceName ?? '--')
+        && autopilot.vehicle_type === 'Submarine' && baro.busType === BUS_TYPE.I2C
+        && baro.bus === this.external_i2c_bus) {
+          results[baro.param] = true
+          continue
         }
-        results[compass.param] = false
+        results[baro.param] = false
       }
       return results
     },
@@ -249,9 +287,10 @@ export default Vue.extend({
       for (const barometer of this.baros) {
         if (!this.is_water_baro[barometer.param]) {
           results[barometer.param] = 'Barometric'
+        } else {
+          const spec_gravity_param = autopilot_data.parameter('BARO_SPEC_GRAV')
+          results[barometer.param] = printParam(spec_gravity_param)
         }
-        const spec_gravity_param = autopilot_data.parameter('BARO_SPEC_GRAV')
-        results[barometer.param] = printParam(spec_gravity_param)
       }
       return results
     },
@@ -259,10 +298,13 @@ export default Vue.extend({
   mounted() {
     mavlink.setMessageRefreshRate({ messageName: 'SCALED_PRESSURE$', refreshRate: 1 })
     mavlink.setMessageRefreshRate({ messageName: 'SCALED_PRESSURE2$', refreshRate: 1 })
+    mavlink.setMessageRefreshRate({ messageName: 'SCALED_PRESSURE3$', refreshRate: 1 })
     mavlink.setMessageRefreshRate({ messageName: 'VFR_HUD', refreshRate: 1 })
   },
   methods: {
-
+    print_bus(bus: BUS_TYPE): string {
+      return BUS_TYPE[bus]
+    },
   },
 })
 </script>

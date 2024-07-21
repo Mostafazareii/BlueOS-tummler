@@ -17,6 +17,7 @@ MAV_COMPONENT_ID_ONBOARD_COMPUTER4=194
 # Enable Rust backtrace for all programs
 RUST_BACKTRACE=1
 
+RUN_AS_REGULAR_USER="sudo -u blueos"
 # Set BlueOS log folder
 BLUEOS_LOG_FOLDER_PATH="/var/logs/blueos"
 
@@ -36,9 +37,9 @@ echo "Available disk space: ${AVAILABLE_SPACE_MB}MB"
 TOTAL_RAM_MB=$(free -m | awk '/Mem:/ {print $2}')
 echo "Total RAM size: ${TOTAL_RAM_MB} MB"
 
-# Update docker binds, if we need to restart, exit!
+# Update docker binds and other boot-time settings, restarts if necessary
 if [ -z "${BLUEOS_DISABLE_STARTUP_UPDATE}" ]; then
-    blueos_startup_update
+    blueos_startup_update.py || true  # We NEVER want to prevent booting
 fi
 
 # Set permission of docker unix socket file to be accessible by nginx
@@ -61,12 +62,12 @@ fi
 # `/etc/resolv.conf`.
 # So for this to work, the container's `/etc/resolv.conf.host` file should be binded (read-only) to
 # the host's `/etc/resolv.conf`, for our system, it's configured in `bootstrap/startup.json.default`,
-# and a patch is added in `core/tools/blueos_startup_update` so systems with older bootstrap
+# and a patch is added in `core/tools/blueos_startup_update.py` so systems with older bootstrap
 # versions can also work with it.
 # One detail is that because docker uses `mount` to bind the host's file to the container's file,
 # if the file-descriptor of the file changes, the bind will be lost. To prevent this, the file being
 # binded must be a hard link to the actual `/etc/resolv.conf`, and that hard link file is the one
-# being binded. This hard link is being done in `core/tools/blueos_startup_update` as
+# being binded. This hard link is being done in `core/tools/blueos_startup_update.py` as
 # `/etc/resolv.conf.host`.
 # To briefly understand why it is necessary, when the docker starts a container, it generates
 # the container `/etc/resolv.conf` based on the host's one, or some docker configuration, however,
@@ -84,6 +85,12 @@ if [ -f "$HOST_RESOLV_CONF" ]; then
 else
     echo "Waring: Using dockers's resolv.conf, this may cause DNS issues if the host's network configuration changes."
 fi
+
+# Fix permissions for logging folders to allow other users to alter it
+find /var/logs/blueos -type d -exec chmod a+rw {} \;
+mkdir -p /usr/blueos/userdata/settings
+find /usr/blueos/userdata -type d -exec chmod a+rw {} \;
+find /usr/blueos/userdata -type f -exec chmod a+rw {} \;
 
 # These services have priority because they do the fundamental for the vehicle to work,
 # and by initializing them first we reduce the time users have to wait to control the vehicle.
@@ -104,7 +111,7 @@ SERVICES=(
     'wifi',0,"nice -19 $SERVICES_PATH/wifi/main.py --socket wlan0"
     # This services are not as important as the others
     'beacon',250,"$SERVICES_PATH/beacon/main.py"
-    'bridget',250,"nice -19 $SERVICES_PATH/bridget/main.py"
+    'bridget',0,"nice -19 $RUN_AS_REGULAR_USER $SERVICES_PATH/bridget/main.py"
     'commander',250,"$SERVICES_PATH/commander/main.py"
     'nmea_injector',250,"nice -19 $SERVICES_PATH/nmea_injector/nmea_injector/main.py"
     'helper',250,"$SERVICES_PATH/helper/main.py"
@@ -113,7 +120,7 @@ SERVICES=(
     'filebrowser',250,"nice -19 filebrowser --database /etc/filebrowser/filebrowser.db --baseurl /file-browser"
     'versionchooser',250,"$SERVICES_PATH/versionchooser/main.py"
     'pardal',250,"nice -19 $SERVICES_PATH/pardal/main.py"
-    'ping',250,"nice -19 $SERVICES_PATH/ping/main.py"
+    'ping',0,"nice -19 $RUN_AS_REGULAR_USER $SERVICES_PATH/ping/main.py"
     'user_terminal',0,"cat /etc/motd"
     'ttyd',250,'nice -19 ttyd -p 8088 sh -c "/usr/bin/tmux attach -t user_terminal || /usr/bin/tmux new -s user_terminal"'
     'nginx',250,"nice -18 nginx -g \"daemon off;\" -c $TOOLS_PATH/nginx/nginx.conf"
@@ -126,6 +133,7 @@ tmux -f /etc/tmux.conf start-server
 function create_service {
     tmux new -d -s "$1" || true
     SESSION_NAME="$1:0"
+    SERVICE_NAME="$1"
     local command="$2"  # Store the command as a string
     local memory_limit_mb=$3
 
@@ -148,8 +156,61 @@ function create_service {
     done
 
     # Use run_service to start the service with the memory limit
-    tmux send-keys -t $SESSION_NAME "run-service '$command' $memory_limit_mb" C-m
+    tmux send-keys -t $SESSION_NAME "run-service '$SERVICE_NAME' '$command' $memory_limit_mb " C-m
 }
+
+ssh_command() {
+  ssh -i /root/.config/.ssh/id_rsa -o StrictHostKeyChecking=no pi@localhost "$1"
+}
+
+prepare_cgroups() {
+  # skip if ssh is not working
+  if ! ssh_command "echo 'SSH is working'"; then
+    echo "SSH is not working, skipping cgroups preparation"
+    return
+  fi
+  # Prepare cgroups for run-service.sh to use
+  # Get the Docker container's hash by its name
+  FULL_COMMAND="docker ps --no-trunc --filter name=blueos-core --format '{{.ID}}'"
+  CONTAINER_HASH=$(ssh_command "$FULL_COMMAND")
+  # Use the Docker container's hash to generate the path
+  FULL_PATH="system.slice/docker-$CONTAINER_HASH.scope"
+
+  # Remove the starting '0::' from FULL_PATH
+  FULL_PATH=${FULL_PATH#0::}
+  # Remove the leading '/'
+  FULL_PATH=${FULL_PATH#/}
+  echo "Docker cgroups root: $FULL_PATH"
+  # Export the full path
+  export DOCKER_CGROUP=$FULL_PATH
+
+  # populated cgroups cannot be changed, so, in order to enable subtree_control, 
+  # we need to create a new child cgroup andmove all processes of this cgroup to it
+  # (as only empty cgroups can be changed).
+
+  echo "Creating a new child cgroup..."
+  # Create a new child cgroup
+  DOCKER_CGROUP_PATH="/sys/fs/cgroup/$DOCKER_CGROUP"
+  mkdir $DOCKER_CGROUP_PATH/child_cgroup
+
+  echo "Moving all processes of this cgroup to the new child cgroup..."
+  # Move all processes of this cgroup to the new child cgroup
+  for PID in $(cat $DOCKER_CGROUP_PATH/cgroup.procs); do
+    echo $PID > $DOCKER_CGROUP_PATH/child_cgroup/cgroup.procs || echo "Failed to move PID $PID, it may be already dead"
+  done
+  echo "PIDs left in the original cgroup:"
+  if [ $(wc -l < $DOCKER_CGROUP_PATH/cgroup.procs) -eq 0 ]; then
+    echo "all PIDs moved successfully"
+  else
+    echo "some PIDs failed to move:"
+    cat $DOCKER_CGROUP_PATH/cgroup.procs
+  fi
+
+  echo "Enabling subtree_control..."
+  echo "+memory" > $DOCKER_CGROUP_PATH/cgroup.subtree_control && echo "subtree_control enabled"
+}
+
+prepare_cgroups
 
 echo "Starting high priority services.."
 for TUPLE in "${PRIORITY_SERVICES[@]}"; do

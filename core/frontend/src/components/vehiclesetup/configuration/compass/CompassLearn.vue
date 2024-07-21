@@ -18,11 +18,11 @@
     </template>
 
     <v-card>
-      <v-card-title class="text-h5 grey lighten-2">
-        Large Vehicle Compass Calibration
+      <v-card-title class="text-h5 grey lighten-2 black--text">
+        Compass Calibration Learning
       </v-card-title>
       <v-card-text>
-        A Valid position is required for Compass Learn to estimate the local world magnetic field.
+        A valid position is required for Compass Learn to estimate the local world magnetic field.
         <auto-coordinate-detector
           v-model="coordinates"
         />

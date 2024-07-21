@@ -26,6 +26,8 @@ BlueOS is a modular, robust, and efficient platform for managing a vehicle or ro
 
 - [Official documentation](https://blueos.cloud/docs/blueos)
 - [Development documentation](https://blueos.cloud/docs/blueos/latest/development/)
+- [Contributions](https://blueos.cloud/docs/blueos/latest/development/core/#contributions)
+- [Code of Conduct](./CoC.md)
 - [Registered Extensions](https://docs.bluerobotics.com/BlueOS-Extensions-Repository)
 - [Install directory](https://github.com/bluerobotics/BlueOS/blob/master/install) (for custom installations)
 
@@ -90,17 +92,17 @@ BlueOS is designed to perform optimally across a wide range of systems. Our late
 
 Right now we officially support the Raspberry Pi 3 and 4, but the system should "just work" on all listed architectures with the correct docker binds.
 
-## Deveompment Environment
+## Development Environment
 
 Docker based development environment is available for via the [`core/compose/compose.yml`](core/compose/compose.yml) docker compose file. This will start a development environment with all the required services as well as mount all of the needed directories in this repository for development.
 
 ```bash
+docker compose pull # Ensure that docker is up-to-date
 docker compose -f core/compose/compose.yml up
 ```
 
 When restarting the development environment you may need to remove the volumes to ensure that the development environment is clean.
 
-```bash 
+```bash
 docker compose -f core/compose/compose.yml down
 ```
-

@@ -1,6 +1,6 @@
 <template>
-  <div class="d-flex flex-col justify-center">
-    <v-card v-if="params_finished_loaded" outline class="pa-5 mt-4 mr-2 mb-2">
+  <div class="main-container">
+    <v-card outline class="pa-2">
       <v-simple-table>
         <thead>
           <tr>
@@ -50,11 +50,6 @@
         <QuickAccelerometerCalibration />
       </v-card-actions>
     </v-card>
-    <spinning-logo
-      v-else
-      size="50%"
-      :subtitle="`${loaded_params}/${total_params} parameters loaded`"
-    />
   </div>
 </template>
 <script lang="ts">
@@ -80,15 +75,6 @@ export default Vue.extend({
     }
   },
   computed: {
-    params_finished_loaded(): boolean {
-      return autopilot_data.finished_loading
-    },
-    loaded_params(): number {
-      return autopilot_data.parameters_loaded
-    },
-    total_params(): number {
-      return autopilot_data.parameters_total
-    },
     imus() : deviceId[] {
       return autopilot_data.parameterRegex('^INS_ACC.*_ID')
         .filter((param) => param.value !== 0)
@@ -109,8 +95,16 @@ export default Vue.extend({
 })
 </script>
 <style scoped="true">
+.main-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 10px;
+}
+
 td {
   padding-left: 5px !important;
   padding-right: 5px !important;
 }
+
 </style>

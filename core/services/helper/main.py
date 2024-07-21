@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import asyncio
+import gzip
 import http.client
 import json
 import logging
@@ -9,6 +10,7 @@ import socket
 from concurrent import futures
 from datetime import datetime
 from enum import Enum
+from io import BytesIO
 from typing import Any, Dict, List, Optional, Set, Union
 from urllib.parse import urlparse
 
@@ -18,7 +20,6 @@ from commonwealth.utils.apis import GenericErrorHandlingRoute, PrettyJSONRespons
 from commonwealth.utils.decorators import temporary_cache
 from commonwealth.utils.general import (
     blueos_version,
-    limit_ram_usage,
     local_hardware_identifier,
     local_unique_identifier,
 )
@@ -34,8 +35,6 @@ from nginx_parser import parse_nginx_file
 
 SERVICE_NAME = "helper"
 SPEED_TEST: Optional[Speedtest] = None
-
-limit_ram_usage(200)
 
 logging.basicConfig(handlers=[InterceptHandler()], level=logging.DEBUG)
 try:
@@ -214,7 +213,7 @@ class Helper:
     PERIODICALLY_RESCAN_3RDPARTY_SERVICES = True
 
     @staticmethod
-    # pylint: disable=too-many-arguments
+    # pylint: disable=too-many-arguments,too-many-branches,too-many-locals
     def simple_http_request(
         host: str,
         port: int = http.client.HTTP_PORT,
@@ -268,7 +267,14 @@ class Helper:
             request_response.status = response.status
             if response.status == http.client.OK:
                 encoding = response.headers.get_content_charset() or "utf-8"
-                request_response.decoded_data = response.read().decode(encoding)
+                if response.getheader("Content-Encoding") == "gzip":
+                    buffer = BytesIO(response.read())
+                    with gzip.GzipFile(fileobj=buffer) as file:
+                        decompressed_data = file.read()
+                else:
+                    decompressed_data = response.read()
+
+                request_response.decoded_data = decompressed_data.decode(encoding)
 
                 # Interpret it as json
                 if try_json:
@@ -305,14 +311,15 @@ class Helper:
         log_msg = f"Detecting service at port {port}"
         if response.status != http.client.OK:
             # If not valid web server, documentation will not be available
-            logger.debug(f"{log_msg}: Invalid")
+            logger.debug(f"{log_msg}: Invalid: {response.status} - {response.decoded_data}")
             return info
 
         info.valid = True
         try:
             soup = BeautifulSoup(response.decoded_data, features="html.parser")
             title_element = soup.find("title")
-            info.title = title_element.text if title_element else "Unknown"
+            info.title = title_element.text.strip() if title_element else "Unknown"
+            log_msg = f"{log_msg}: {info.title}"
         except Exception as e:
             logger.warning(f"Failed parsing the service title: {e}")
 

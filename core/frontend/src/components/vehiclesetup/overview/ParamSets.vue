@@ -1,6 +1,6 @@
 <template>
-  <v-row>
-    <v-card class="ma-2 pa-2">
+  <v-row class="main-container">
+    <v-card class="card-container">
       <v-card-title class="align-center">
         Reset Parameters to Firmware Defaults
       </v-card-title>
@@ -9,6 +9,8 @@
           This will effectively wipe your "eeprom". You will lose all your parameters, vehicle setup, and calibrations.
           Use this if you don't know which parameters you changed and need a clean start.
         </p>
+      </v-card-text>
+      <v-card-actions>
         <v-btn :disabled="wipe_successful" :loading="erasing" color="primary" @click="wipe">
           Reset All Parameters
         </v-btn>
@@ -28,14 +30,14 @@
         >
           Parameters reset <b>successful</b>. <span v-if="!done"> Please reboot the vehicle to apply changes. </span>
         </v-alert>
-      </v-card-text>
+      </v-card-actions>
       <ParameterLoader
         v-if="selected_paramset"
         :parameters="selected_paramset"
         @done="selected_paramset = {}"
       />
     </v-card>
-    <v-card class="ma-2 pa-2">
+    <v-card class="card-container">
       <v-card-title class="align-center">
         Load Recommended Parameter sets
       </v-card-title>
@@ -43,6 +45,8 @@
         <p>
           These are the recommended parameter sets for your vehicle and firmware version. Curated by Blue Robotics
         </p>
+      </v-card-text>
+      <v-card-actions>
         <v-btn
           v-for="(paramSet, name) in filtered_param_sets"
           :key="name"
@@ -54,12 +58,12 @@
         <p v-if="(Object.keys(filtered_param_sets).length === 0)">
           No parameters available for this setup
         </p>
-      </v-card-text>
-      <ParameterLoader
-        v-if="selected_paramset"
-        :parameters="selected_paramset"
-        @done="selected_paramset = {}"
-      />
+        <ParameterLoader
+          v-if="selected_paramset"
+          :parameters="selected_paramset"
+          @done="selected_paramset = {}"
+        />
+      </v-card-actions>
     </v-card>
   </v-row>
 </template>
@@ -71,7 +75,9 @@ import Vue from 'vue'
 import * as AutopilotManager from '@/components/autopilot/AutopilotManagerUpdater'
 import ParameterLoader from '@/components/parameter-editor/ParameterLoader.vue'
 import mavlink2rest from '@/libs/MAVLink2Rest'
-import { MavCmd } from '@/libs/MAVLink2Rest/mavlink2rest-ts/messages/mavlink2rest-enum'
+import {
+  MavCmd, MavResult,
+} from '@/libs/MAVLink2Rest/mavlink2rest-ts/messages/mavlink2rest-enum'
 import Notifier from '@/libs/notifier'
 import autopilot_data from '@/store/autopilot'
 import autopilot from '@/store/autopilot_manager'
@@ -151,55 +157,27 @@ export default Vue.extend({
       this.done = true
       this.rebooting = false
     },
-    wipe() {
+    async wipe() {
       this.erasing = true
-      mavlink2rest.sendMessage({
-        header: {
-          system_id: 255,
-          component_id: 1,
-          sequence: 1,
-        },
-        message: {
-          type: 'COMMAND_LONG',
-          param1: 2, // PARAM_RESET_CONFIG_DEFAULT from MAV_CMD_PREFLIGHT_STORAGE
-          param2: 0,
-          param3: 0,
-          param4: 0,
-          param5: 0,
-          param6: 0,
-          param7: 0,
-          command: {
-            type: MavCmd.MAV_CMD_PREFLIGHT_STORAGE,
-          },
-          target_system: autopilot_data.system_id,
-          target_component: 1,
-          confirmation: 1,
-        },
-      })
-      let timeout = 0
-      const ack_listener = mavlink2rest.startListening('COMMAND_ACK').setCallback((message) => {
-        if (message.message.command.type === 'MAV_CMD_PREFLIGHT_STORAGE') {
-          if (message.message.result.type === 'MAV_RESULT_ACCEPTED') {
-            clearTimeout(timeout)
-            this.wipe_successful = true
-            ack_listener.discard()
-            autopilot_data.setRebootRequired(true)
-            this.erasing = false
-            return
-          }
-          this.wipe_successful = false
-          ack_listener.discard()
-          clearTimeout(timeout)
-          this.erasing = false
-          notifier.pushError('PARAM_RESET_FAIL', `Parameters Reset failed: ${message.message.result.type}`, true)
+      mavlink2rest.sendCommandLong(
+        MavCmd.MAV_CMD_PREFLIGHT_STORAGE,
+        2, // PARAM_RESET_CONFIG_DEFAULT from MAV_CMD_PREFLIGHT_STORAGE
+      )
+      const timeout = 0
+      try {
+        const ack = await mavlink2rest.waitForAck(MavCmd.MAV_CMD_PREFLIGHT_STORAGE)
+        if (ack.result.type !== MavResult.MAV_RESULT_ACCEPTED) {
+          throw new Error(`Command not accepted: ${ack.result.type}`)
         }
-      })
-      timeout = setTimeout(() => {
-        ack_listener.discard()
+        clearTimeout(timeout)
+        this.wipe_successful = true
+        autopilot_data.setRebootRequired(true)
+      } catch (e) {
         this.wipe_successful = false
+        notifier.pushError('PARAM_RESET_FAIL', `Parameters Reset failed: ${e}`, true)
+      } finally {
         this.erasing = false
-        notifier.pushError('PARAM_RESET_TIMEOUT', 'Parameters Reset timed out', true)
-      }, 2000)
+      }
     },
 
   },
@@ -208,6 +186,18 @@ export default Vue.extend({
 <style scoped>
 button {
     margin: 10px;
+}
+
+.main-container {
+  display: flex;
+  padding: 25px;
+  gap: 10px;
+}
+
+.card-container {
+  flex: 1 1 calc(50% - 10px);
+  max-width: calc(50% - 0px);
+  min-width: 600px;
 }
 
 .virtual-table-row {

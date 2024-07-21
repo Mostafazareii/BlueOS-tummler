@@ -23,16 +23,22 @@
                   <th class="text-left subtitle-1 font-weight-bold">
                     Motor Test
                   </th>
+                  <th />
                   <th>
-                    <v-switch
-                      v-model="desired_armed_state"
-                      :loading="desired_armed_state !== (is_armed) ? 'warning' : null"
-                      :disabled="!is_manual"
-                      class="mx-1 flex-grow-0"
-                      :label="arm_disarm_switch_label"
-                      :color="`${is_armed ? 'error' : 'success'}`"
-                      @change="arm_disarm_switch_change"
-                    />
+                    <div class="flex-row justify-space-between d-flex">
+                      <v-switch
+                        v-model="desired_armed_state"
+                        :loading="desired_armed_state !== (is_armed) ? 'warning' : null"
+                        :disabled="!is_manual"
+                        class="mx-1 flex-grow-0"
+                        :label="arm_disarm_switch_label"
+                        :color="`${is_armed ? 'error' : 'success'}`"
+                        @change="arm_disarm_switch_change"
+                      />
+                      <div style="width:50%" class="d-flex justify-center mt-3">
+                        <MotorDetection />
+                      </div>
+                    </div>
                   </th>
                   <th />
                 </tr>
@@ -51,6 +57,15 @@
                 >
                   <td width="20%">
                     {{ motor.name }}
+                  </td>
+                  <td width="10%">
+                    <parameterSwitch
+                      v-if="motor.reverse_parameter"
+                      :parameter="motor.reverse_parameter"
+                      :on-value="reverse_on_value"
+                      :off-value="reverse_off_value"
+                      label="Reversed"
+                    />
                   </td>
                   <td width="80%">
                     <v-slider
@@ -138,10 +153,10 @@
 import Vue from 'vue'
 
 import ParameterEditorDialog from '@/components/parameter-editor/ParameterEditorDialog.vue'
+import MotorDetection from '@/components/vehiclesetup/MotorDetection.vue'
 import VehicleViewer from '@/components/vehiclesetup/viewers/VehicleViewer.vue'
-import mavlink2rest from '@/libs/MAVLink2Rest'
 import {
-  MavCmd, MavModeFlag,
+  MavModeFlag,
 } from '@/libs/MAVLink2Rest/mavlink2rest-ts/messages/mavlink2rest-enum'
 import { Message } from '@/libs/MAVLink2Rest/mavlink2rest-ts/messages/mavlink2rest-message'
 import autopilot_data from '@/store/autopilot'
@@ -152,12 +167,17 @@ import Parameter, { printParam } from '@/types/autopilot/parameter'
 import { SERVO_FUNCTION as ROVER_FUNCTIONS } from '@/types/autopilot/parameter-rover-enums'
 import { SERVO_FUNCTION } from '@/types/autopilot/parameter-sub-enums'
 import { Dictionary } from '@/types/common'
+import { armDisarm, doMotorTest } from '@/utils/ardupilot_mavlink'
 import mavlink_store_get from '@/utils/mavlink'
+
+import ParameterSwitch from '../common/ParameterSwitch.vue'
 
 interface MotorTestTarget {
   name: string
   servo: number // target and servo differ in rover
   target: number
+  direction: number
+  reverse_parameter?: Parameter
 }
 
 const rover_function_map = {
@@ -180,7 +200,9 @@ export default Vue.extend({
   name: 'PwmSetup',
   components: {
     ParameterEditorDialog,
+    ParameterSwitch,
     VehicleViewer,
+    MotorDetection,
   },
   data() {
     return {
@@ -192,9 +214,11 @@ export default Vue.extend({
       motor_zeroer_interval: undefined as undefined | number,
       motor_writer_interval: undefined as undefined | number,
       desired_armed_state: false,
-      arming_timeout: undefined as number | undefined,
       has_focus: true,
       motors_zeroed: false,
+      // These two change from firmware to firmware...
+      reverse_on_value: 1.0,
+      reverse_off_value: 0.0,
     }
   },
   computed: {
@@ -221,11 +245,14 @@ export default Vue.extend({
       ).map((parameter) => {
         const number = parseInt(/\d+/g.exec(parameter.name)?.[0] ?? '0', 10)
         const name = param_value_map.Submarine[parameter.name] ?? `Motor ${number}`
+        const direction_parameter = autopilot_data.parameterRegex(`MOT_${number}_DIRECTION`)?.[0]
         const target = number - 1
         return {
           name,
           servo: number,
           target,
+          direction: direction_parameter.value,
+          reverse_parameter: direction_parameter,
         }
       })
     },
@@ -234,6 +261,14 @@ export default Vue.extend({
         return this.available_rover_motors
       }
       return this.available_sub_motors
+    },
+    motor_direction(): {[key: number]: number} {
+      const motorDict = {} as {[key: number]: number}
+      const availableMotors = this.available_motors
+      for (const motor of availableMotors) {
+        motorDict[motor.target] = motor.direction
+      }
+      return motorDict
     },
     available_rover_motors(): MotorTestTarget[] {
       return this.servo_function_parameters.filter(
@@ -248,12 +283,24 @@ export default Vue.extend({
         const name = printParam(parameter)
         const servo = parseInt(/\d+/g.exec(parameter.name)?.[0] ?? '0', 10)
         const target = rover_function_map[parameter.value] ?? 0
+        const reverse_parameter = autopilot_data.parameterRegex(`SERVO${servo}_REVERSED`)?.[0]
         return {
           name,
           servo,
           target,
+          direction: reverse_parameter.value ? -1.0 : 1.0,
+          reverse_parameter,
         }
       })
+    },
+    motor_target_with_reversion(): {[key: number]: number} {
+      const targets = { ...this.motor_targets }
+      for (const motor_string of Object.keys(targets)) {
+        const motor = parseInt(motor_string, 10)
+        const raw_value = targets[motor] - 1500
+        targets[motor] = 1500 + this.motor_direction[motor] * raw_value
+      }
+      return targets
     },
     vehicle_id(): number {
       return autopilot_data.system_id
@@ -327,6 +374,12 @@ export default Vue.extend({
       // To reflect changed made from other sources like from GCSs
       this.desired_armed_state = this.is_armed
     },
+    is_rover() {
+      this.updateReversionValues()
+    },
+    is_sub() {
+      this.updateReversionValues()
+    },
   },
   mounted() {
     this.motor_zeroer_interval = setInterval(this.zero_motors, 300)
@@ -334,6 +387,7 @@ export default Vue.extend({
     mavlink.setMessageRefreshRate({ messageName: 'SERVO_OUTPUT_RAW', refreshRate: 10 })
     this.desired_armed_state = this.is_armed
     this.installListeners()
+    this.updateReversionValues()
   },
   beforeDestroy() {
     clearInterval(this.motor_zeroer_interval)
@@ -342,6 +396,16 @@ export default Vue.extend({
     this.uninstallListeners()
   },
   methods: {
+    updateReversionValues() {
+      if (this.is_rover) {
+        this.reverse_on_value = 1.0
+        this.reverse_off_value = 0
+        return
+      }
+      // sub
+      this.reverse_on_value = -1.0
+      this.reverse_off_value = 1.0
+    },
     focusListener() {
       this.has_focus = true
     },
@@ -373,6 +437,9 @@ export default Vue.extend({
     },
     printParam,
     zero_motors() {
+      if (!this.is_manual) {
+        return
+      }
       if (!this.has_focus && this.motors_zeroed) {
         return
       }
@@ -385,9 +452,9 @@ export default Vue.extend({
       if (!this.has_focus) {
         return
       }
-      if (this.is_armed && this.desired_armed_state) {
-        for (const [motor, value] of Object.entries(this.motor_targets)) {
-          this.doMotorTest(parseInt(motor, 10), value)
+      if (this.is_armed && this.desired_armed_state && this.is_manual) {
+        for (const [motor, value] of Object.entries(this.motor_target_with_reversion)) {
+          doMotorTest(parseInt(motor, 10), value)
         }
       }
       this.motors_zeroed = false
@@ -400,79 +467,20 @@ export default Vue.extend({
       clearInterval(this.motor_zeroer_interval)
     },
     arm() {
-      this.armDisarm(true, true)
-      this.arming_timeout = setTimeout(() => {
-        if (this.desired_armed_state === this.is_armed) return
+      armDisarm(true, true).catch(() => {
         this.desired_armed_state = this.is_armed
         console.warn('Arming failed!')
-      }, 5000)
+      })
     },
     disarm() {
-      this.armDisarm(false, true)
-      this.arming_timeout = setTimeout(() => {
-        if (this.desired_armed_state === this.is_armed) return
+      armDisarm(false, true).catch(() => {
         this.desired_armed_state = this.is_armed
         console.warn('Disarming failed!')
-      }, 5000)
+      })
     },
     arm_disarm_switch_change(should_arm: boolean): void {
       // eslint-disable-next-line no-unused-expressions
       should_arm ? this.arm() : this.disarm()
-    },
-    armDisarm(arm: boolean, force: boolean): void {
-      mavlink2rest.sendMessage(
-        {
-          header: {
-            system_id: 255,
-            component_id: 0,
-            sequence: 0,
-          },
-          message: {
-            type: 'COMMAND_LONG',
-            param1: arm ? 1 : 0, // 0: Disarm, 1: ARM,
-            param2: force ? 21196 : 0, // force arming/disarming (override preflight checks and disarming in flight)
-            param3: 0,
-            param4: 0,
-            param5: 0,
-            param6: 0,
-            param7: 0,
-            command: {
-              type: MavCmd.MAV_CMD_COMPONENT_ARM_DISARM,
-            },
-            target_system: autopilot_data.system_id,
-            target_component: 1,
-            confirmation: 0,
-          },
-        },
-      )
-    },
-    async doMotorTest(motorId: number, output: number): Promise<void> {
-      mavlink2rest.sendMessageViaWebsocket(
-        {
-          header: {
-            system_id: 255,
-            component_id: 0,
-            sequence: 0,
-          },
-          message: {
-            type: 'COMMAND_LONG',
-            // Rover and Sub have different starting numbers for motors
-            param1: motorId, // MOTOR_TEST_ORDER
-            param2: 1, // MOTOR_TEST_THROTTLE_PWM
-            param3: output,
-            param4: 1, // Seconds running the motor
-            param5: 1, // Number of motors to be tested
-            param6: 2, // Motor numbers are specified as the output as labeled on the board.
-            param7: 0,
-            command: {
-              type: MavCmd.MAV_CMD_DO_MOTOR_TEST,
-            },
-            target_system: autopilot_data.system_id,
-            target_component: 1,
-            confirmation: 0,
-          },
-        },
-      )
     },
   },
 })

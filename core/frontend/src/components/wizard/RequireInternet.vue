@@ -1,7 +1,7 @@
 <template>
-  <div>
+  <div class="d-flex justify-center align-center">
     <v-card elevation="0">
-      <v-stepper vertical>
+      <v-stepper vertical elevation="0">
         <v-stepper-step
           step="1"
           :color="icon_color"
@@ -77,6 +77,11 @@ export default Vue.extend({
         this.checkInternet()
       }
     },
+    is_online() {
+      if (this.is_online) {
+        this.$emit('online')
+      }
+    },
   },
   async mounted() {
     this.checkInternet()
@@ -106,7 +111,7 @@ export default Vue.extend({
           if (!this.is_online) {
             this.timeout = setTimeout(() => {
               this.checkInternet()
-            }, 1000)
+            }, 5000)
           } else {
             clearInterval(this.timeout)
             this.timeout = setTimeout(() => {
