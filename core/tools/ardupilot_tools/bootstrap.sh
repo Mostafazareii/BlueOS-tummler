@@ -13,9 +13,9 @@ fi
 mkdir -p "$PYTHON_BIN_DIR"
 
 ### Ardupilot's uploader is used to upload firmwares to serial boards
-COMMIT_HASH=f6544ca25ab232407ec102b7a5adf0adca0f2062
+COMMIT_HASH=Atlas
 LOCAL_PATH_UPLOADER="$PYTHON_BIN_DIR/ardupilot_fw_uploader.py"
-REMOTE_URL_UPLOADER="https://raw.githubusercontent.com/ArduPilot/ardupilot/${COMMIT_HASH}/Tools/scripts/uploader.py"
+REMOTE_URL_UPLOADER="https://raw.githubusercontent.com/Mostafazareii/ardupilot-tummler-version/${COMMIT_HASH}/Tools/scripts/uploader.py"
 
 # Sudo command is not available on docker and the script is also used in different environments
 # The SUDO alias allow the usage of sudo when such command exists and also ignore if it doesn't
@@ -46,9 +46,9 @@ export PYTHONPATH="$SITE_PACKAGES:$PYTHONPATH"
 mkdir -p "$SITE_PACKAGES"
 
 ### Ardupilot's decoder is used to parse and validate firmware ELF files
-COMMIT_HASH=7b5c1f16c1bbc986244dd83c690801790d6bc680
+COMMIT_HASH=Atlas
 LOCAL_PATH_DECODER="$SITE_PACKAGES/ardupilot_fw_decoder.py"
-REMOTE_URL_DECODER="https://raw.githubusercontent.com/ArduPilot/ardupilot/${COMMIT_HASH}/Tools/scripts/firmware_version_decoder.py"
+REMOTE_URL_DECODER="https://raw.githubusercontent.com/Mostafazareii/ardupilot-tummler-version/${COMMIT_HASH}/Tools/scripts/firmware_version_decoder.py"
 if [ ! -f "$LOCAL_PATH_DECODER" ]; then
     wget "$REMOTE_URL_DECODER" -O "$LOCAL_PATH_DECODER"
 else
@@ -57,9 +57,9 @@ fi
 
 
 ### Ardupilot's apj_tool is used to embed params into apj files
-COMMIT_HASH=b839ddcc00f4cb89d89aaa8cf0cb03298d2f00b4
+COMMIT_HASH=Atlas
 LOCAL_PATH_APJ_TOOL="$PYTHON_BIN_DIR/apj_tool.py"
-REMOTE_URL_APJ_TOOL="https://raw.githubusercontent.com/ArduPilot/ardupilot/${COMMIT_HASH}/Tools/scripts/apj_tool.py"
+REMOTE_URL_APJ_TOOL="https://raw.githubusercontent.com/Mostafazareii/ardupilot-tummler-version/${COMMIT_HASH}/Tools/scripts/apj_tool.py"
 if [ ! -f "$LOCAL_PATH_APJ_TOOL" ]; then
     $SUDO wget "$REMOTE_URL_APJ_TOOL" -O "$LOCAL_PATH_APJ_TOOL"
     $SUDO chmod +x "$LOCAL_PATH_APJ_TOOL"
