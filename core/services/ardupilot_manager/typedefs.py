@@ -112,6 +112,7 @@ class Platform(str, Enum):
     Navigator = "navigator"
     Argonot = "argonot"
     SITL = get_sitl_platform_name(machine())
+    Tummler = "tummler"
 
     @property
     def type(self) -> PlatformType:
