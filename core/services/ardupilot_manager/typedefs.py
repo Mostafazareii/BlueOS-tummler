@@ -126,6 +126,7 @@ class Platform(str, Enum):
             Platform.Navigator: PlatformType.Linux,
             Platform.Argonot: PlatformType.Linux,
             Platform.SITL: PlatformType.SITL,
+            Platform.Tummler: PlatformType.Linux,
         }
         return platform_types.get(self, PlatformType.Unknown)
 
