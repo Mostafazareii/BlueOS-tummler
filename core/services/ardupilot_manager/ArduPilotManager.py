@@ -20,6 +20,7 @@ from exceptions import (
 )
 from firmware.FirmwareManagement import FirmwareManager
 from flight_controller_detector.Detector import Detector as BoardDetector
+from flight_controller_detector.linux.linux_boards import LinuxFlightController
 from mavlink_proxy.Endpoint import Endpoint
 from mavlink_proxy.Manager import Manager as MavlinkManager
 from settings import Settings
@@ -157,12 +158,8 @@ class ArduPilotManager(metaclass=Singleton):
         # The first column comes from https://ardupilot.org/dev/docs/sitl-serial-mapping.html
 
         if "serials" not in self.configuration:
-            return [
-                Serial(port="C", endpoint="/dev/ttyS0"),
-                Serial(port="B", endpoint="/dev/ttyAMA1"),
-                Serial(port="E", endpoint="/dev/ttyAMA2"),
-                Serial(port="F", endpoint="/dev/ttyAMA3"),
-            ]
+            assert isinstance(self._current_board, LinuxFlightController)
+            return self._current_board.get_serials()
         serials = []
         for entry in self.configuration["serials"]:
             try:
@@ -172,10 +169,6 @@ class ArduPilotManager(metaclass=Singleton):
                 logger.error(e)
         return serials
 
-    def get_serial_cmdlines(self) -> str:
-        cmdlines = [f"-{entry.port} {entry.endpoint}" for entry in self.get_serials()]
-        return " ".join(cmdlines)
-
     def get_default_params_cmdline(self, platform: Platform) -> str:
         # check if file exists and return it's path as --defaults parameter
         default_params_path = self.firmware_manager.default_user_params_path(platform)
@@ -183,7 +176,7 @@ class ArduPilotManager(metaclass=Singleton):
             return f"--defaults {default_params_path}"
         return ""
 
-    async def start_linux_board(self, board: FlightController) -> None:
+    async def start_linux_board(self, board: LinuxFlightController) -> None:
         self._current_board = board
         if not self.firmware_manager.is_firmware_installed(self._current_board):
             if board.platform == Platform.Navigator:
@@ -229,7 +222,7 @@ class ArduPilotManager(metaclass=Singleton):
             f" -A udp:{master_endpoint.place}:{master_endpoint.argument}"
             f" --log-directory {self.settings.firmware_folder}/logs/"
             f" --storage-directory {self.settings.firmware_folder}/storage/"
-            f" {self.get_serial_cmdlines()}"
+            f" {self._current_board.get_serial_cmdlines()}"
             f" {self.get_default_params_cmdline(board.platform)}"
         )
 
@@ -253,7 +246,8 @@ class ArduPilotManager(metaclass=Singleton):
             raise ValueError(f"Could not find device path for board {board.name}.")
         self._current_board = board
         baudrate = 115200
-        if "px4" in board.name.lower():
+        is_px4 = "px4" in board.name.lower()
+        if is_px4:
             baudrate = 57600
         await self.start_mavlink_manager(
             Endpoint(
@@ -265,6 +259,9 @@ class ArduPilotManager(metaclass=Singleton):
                 protected=True,
             )
         )
+        if is_px4:
+            # PX4 needs at least one initial heartbeat to start sending data
+            await self.vehicle_manager.burst_heartbeat()
 
     def set_sitl_frame(self, frame: SITLFrame) -> None:
         self.current_sitl_frame = frame
@@ -356,6 +353,15 @@ class ArduPilotManager(metaclass=Singleton):
                 enabled=True,
             ),
             Endpoint(
+                name="MAVLink2RestServer",
+                owner=self.settings.app_name,
+                connection_type=EndpointType.UDPServer,
+                place="127.0.0.1",
+                argument=14001,
+                persistent=True,
+                protected=True,
+            ),
+            Endpoint(
                 name="MAVLink2Rest",
                 owner=self.settings.app_name,
                 connection_type=EndpointType.UDPClient,
@@ -363,6 +369,7 @@ class ArduPilotManager(metaclass=Singleton):
                 argument=14000,
                 persistent=True,
                 protected=True,
+                overwrite_settings=True,
             ),
             Endpoint(
                 name="Internal Link",
@@ -402,7 +409,10 @@ class ArduPilotManager(metaclass=Singleton):
 
     async def change_board(self, board: FlightController) -> None:
         logger.info(f"Trying to run with '{board.name}'.")
-        if board not in await self.available_boards():
+        boards = await self.available_boards()
+        if not any(board.name == detectedboard.name for detectedboard in boards):
+            logger.error(f"Attempted to change active board to {board} which is not detected.")
+            logger.info(f"detected boards are: {boards}")
             raise ValueError(f"Cannot use '{board.name}'. Board not detected.")
         self.set_preferred_board(board)
         await self.kill_ardupilot()
@@ -523,6 +533,7 @@ class ArduPilotManager(metaclass=Singleton):
             logger.info(f"Using {flight_controller.name} flight-controller.")
 
             if flight_controller.platform.type == PlatformType.Linux:
+                assert isinstance(flight_controller, LinuxFlightController)
                 await self.start_linux_board(flight_controller)
             elif flight_controller.platform.type == PlatformType.Serial:
                 await self.start_serial(flight_controller)
