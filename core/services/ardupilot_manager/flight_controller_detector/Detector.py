@@ -85,6 +85,7 @@ class Detector:
         if is_tummler_r1_connected():
             logger.debug("Tummler Board R1 detected")
             return FlightController(name="Tummler", manufacturer="Tummler ROV", platform=Platform.Tummler)
+            
         logger.debug("No Linux board detected.")
         return None
 
