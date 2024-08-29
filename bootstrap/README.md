@@ -11,6 +11,7 @@ You can run the following command to build it:
 ```bash
 cd bootstrap
 docker build . --tag bluerobotics/bootstrap:master
+
 ```
 
 ### Usage:
