@@ -1,3 +1,4 @@
+import asyncio
 from typing import List, Optional
 
 from commonwealth.utils.general import is_running_as_root
@@ -10,7 +11,18 @@ from typedefs import FlightController, FlightControllerFlags, Platform
 
 
 class Detector:
-    @staticmethod
+    @classmethod
+    async def detect_linux_board(cls) -> Optional[FlightController]:
+        for _i in range(5):
+            board = cls._detect_linux_board()
+            if board:
+                return board
+            await asyncio.sleep(0.1)
+        return None
+
+    @classmethod
+    def _detect_linux_board(cls) -> Optional[FlightController]:
+        @staticmethod
     def detect_linux_board() -> Optional[FlightController]:
         """Returns Linux board if connected.
         Check for connection using the sensors on the I²C and SPI buses.
