@@ -22,8 +22,6 @@ class Detector:
 
     @classmethod
     def _detect_linux_board(cls) -> Optional[FlightController]:
-        @staticmethod
-    def detect_linux_board() -> Optional[FlightController]:
         """Returns Linux board if connected.
         Check for connection using the sensors on the I²C and SPI buses.
 
@@ -47,16 +45,17 @@ class Detector:
                 PCA9685_address = 0x40
                 bus.read_byte_data(PCA9685_address, 0)
                 return True
-            except Exception:
+            except Exception as error:
+                logger.warning(f"Navigator not detected: {error}")
                 return False
-
         def is_argonot_r1_connected() -> bool:
             try:
                 bus = SMBus(1)
                 swap_multiplexer_address = 0x77
                 bus.read_byte_data(swap_multiplexer_address, 0)
                 return True
-            except Exception:
+            except Exception as error:
+                logger.warning(f"Argonot not detected: {error}")
                 return False
 
         def is_tummler_r1_connected() -> bool:
