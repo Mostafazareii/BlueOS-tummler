@@ -48,6 +48,15 @@ class Detector:
             except Exception as error:
                 logger.warning(f"Navigator not detected: {error}")
                 return False
+        def is_argonot_r1_connected() -> bool:
+            try:
+                bus = SMBus(1)
+                swap_multiplexer_address = 0x77
+                bus.read_byte_data(swap_multiplexer_address, 0)
+                return True
+            except Exception as error:
+                logger.warning(f"Argonot not detected: {error}")
+                return False
         def is_tummler_r1_connected() -> bool:
             try:
                 bus = SMBus(1)
@@ -65,16 +74,7 @@ class Detector:
                 return True
             except Exception:
                 return False
-        def is_argonot_r1_connected() -> bool:
-            try:
-                bus = SMBus(1)
-                swap_multiplexer_address = 0x77
-                bus.read_byte_data(swap_multiplexer_address, 0)
-                return True
-            except Exception as error:
-                logger.warning(f"Argonot not detected: {error}")
-                return False
-    
+                
         logger.debug("Trying to detect Linux board.")
         if is_navigator_r5_connected():
             logger.debug("Navigator R5 detected.")
