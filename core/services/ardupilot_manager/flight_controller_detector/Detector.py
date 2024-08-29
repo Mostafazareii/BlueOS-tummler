@@ -139,7 +139,7 @@ class Detector:
         if not is_running_as_root():
             return available
 
-        linux_board = cls.detect_linux_board()
+        linux_board = await cls.detect_linux_board()
         if linux_board:
             available.append(linux_board)
 
