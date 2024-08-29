@@ -1,4 +1,3 @@
-import asyncio
 from typing import List, Optional
 
 from commonwealth.utils.general import is_running_as_root
@@ -11,17 +10,8 @@ from typedefs import FlightController, FlightControllerFlags, Platform
 
 
 class Detector:
-    @classmethod
-    async def detect_linux_board(cls) -> Optional[FlightController]:
-        for _i in range(5):
-            board = cls._detect_linux_board()
-            if board:
-                return board
-            await asyncio.sleep(0.1)
-        return None
-
-    @classmethod
-    def _detect_linux_board(cls) -> Optional[FlightController]:
+    @staticmethod
+    def detect_linux_board() -> Optional[FlightController]:
         """Returns Linux board if connected.
         Check for connection using the sensors on the I²C and SPI buses.
 
@@ -45,18 +35,18 @@ class Detector:
                 PCA9685_address = 0x40
                 bus.read_byte_data(PCA9685_address, 0)
                 return True
-            except Exception as error:
-                logger.warning(f"Navigator not detected: {error}")
+            except Exception:
                 return False
+
         def is_argonot_r1_connected() -> bool:
             try:
                 bus = SMBus(1)
                 swap_multiplexer_address = 0x77
                 bus.read_byte_data(swap_multiplexer_address, 0)
                 return True
-            except Exception as error:
-                logger.warning(f"Argonot not detected: {error}")
+            except Exception:
                 return False
+
         def is_tummler_r1_connected() -> bool:
             try:
                 bus = SMBus(1)
@@ -74,7 +64,7 @@ class Detector:
                 return True
             except Exception:
                 return False
-                
+
         logger.debug("Trying to detect Linux board.")
         if is_navigator_r5_connected():
             logger.debug("Navigator R5 detected.")
@@ -85,7 +75,6 @@ class Detector:
         if is_tummler_r1_connected():
             logger.debug("Tummler Board R1 detected")
             return FlightController(name="Tummler", manufacturer="Tummler ROV", platform=Platform.Tummler)
-            
         logger.debug("No Linux board detected.")
         return None
 
@@ -137,7 +126,7 @@ class Detector:
         return FlightController(name="SITL", manufacturer="ArduPilot Team", platform=Platform.SITL)
 
     @classmethod
-    async def detect(cls, include_sitl: bool = True) -> List[FlightController]:
+    def detect(cls, include_sitl: bool = True) -> List[FlightController]:
         """Return a list of available flight controllers
 
         Arguments:
@@ -150,7 +139,7 @@ class Detector:
         if not is_running_as_root():
             return available
 
-        linux_board = await cls.detect_linux_board()
+        linux_board = cls.detect_linux_board()
         if linux_board:
             available.append(linux_board)
 
