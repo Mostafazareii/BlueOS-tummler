@@ -64,20 +64,6 @@ class Detector:
                 bus = SMBus(1)
                 STM32_address2 = 0x66
                 bus.read_byte_data(STM32_address2, 0)
-
-                
-                # QMC5883L_address = 0x0D
-                
-                # bus.read_byte_data(QMC5883L_address, 0)
-
-                # MS5837_address = 0x76
-                
-                # bus.read_byte_data(MS5837_address, 0)
-
-                # STM32_address1 = 0x48
-                
-                # bus.read_byte_data(STM32_address1, 0)
-                
                 return True
             except Exception:
                 return False
