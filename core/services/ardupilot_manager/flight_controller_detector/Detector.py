@@ -62,6 +62,8 @@ class Detector:
         def is_tummler_r1_connected() -> bool:
             try:
                 bus = SMBus(1)
+                STM32_address2 = 0x66
+                bus.read_byte_data(STM32_address2, 0)
 
                 
                 # QMC5883L_address = 0x0D
@@ -75,9 +77,6 @@ class Detector:
                 # STM32_address1 = 0x48
                 
                 # bus.read_byte_data(STM32_address1, 0)
-
-                STM32_address2 = 0x66
-                bus.read_byte_data(STM32_address2, 0)
                 
                 return True
             except Exception:
