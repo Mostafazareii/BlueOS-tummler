@@ -4,45 +4,68 @@
     v-model="is_form_valid"
     @submit.prevent="saveEditedParam"
   >
-    <template v-if="!custom_input && param?.bitmask">
-      <v-checkbox
-        v-for="(key, keyvalue) in param.bitmask"
-        :key="keyvalue"
-        v-model="selected_bitflags"
-        dense
-        hide-details
-        :loading="waiting_for_param_update"
-        :label="key"
-        :value="2 ** keyvalue"
-      />
-    </template>
-    <v-autocomplete
-      v-else-if="!custom_input && Object.entries(param?.options ?? []).length > 10"
-      v-model.number="internal_new_value"
-      variant="solo"
-      :items="as_select_items"
-    />
-    <v-select
-      v-else-if="!custom_input && param?.options"
-      v-model.number="internal_new_value"
-      dense
-      :items="as_select_items"
-      :label="label"
-      :indeterminate="waiting_for_param_update"
-      @change="updateVariables"
-    />
-    <v-text-field
-      v-if="custom_input || (!param?.options && !param?.bitmask)"
-      v-model.number="internal_new_value"
-      dense
-      type="number"
-      :label="label"
-      :step="param.increment ?? 0.01"
-      :suffix="param.units"
-      :rules="forcing_input ? [] : [isInRange, isValidType]"
-      :loading="waiting_for_param_update"
-      @blur="updateVariables"
-    />
+    <div class="d-flex align-center">
+      <div class="flex-grow-1">
+        <!-- Bitmask checkboxes -->
+        <template v-if="!custom_input && param?.bitmask">
+          <v-checkbox
+            v-for="(key, keyvalue) in param.bitmask"
+            :key="keyvalue"
+            v-model="selected_bitflags"
+            dense
+            hide-details
+            :loading="waiting_for_param_update"
+            :label="key"
+            :value="2 ** keyvalue"
+          />
+        </template>
+
+        <!-- Autocomplete for many options -->
+        <v-autocomplete
+          v-else-if="!custom_input && Object.entries(param?.options ?? []).length > 10"
+          v-model.number="internal_new_value"
+          variant="solo"
+          :loading="waiting_for_param_update"
+          :items="as_select_items"
+        >
+          <template #label>
+            <parameter-label :label="label ?? 'Select an option'" :param="param" :format-options="formatOptions" />
+          </template>
+        </v-autocomplete>
+
+        <!-- Select for few options -->
+        <v-select
+          v-else-if="!custom_input && param?.options"
+          v-model.number="internal_new_value"
+          dense
+          :items="as_select_items"
+          :indeterminate="waiting_for_param_update"
+          @change="updateVariables"
+        >
+          <template #label>
+            <parameter-label :label="label ?? 'Choose a value'" :param="param" :format-options="formatOptions" />
+          </template>
+        </v-select>
+
+        <!-- Text input for numbers -->
+        <v-text-field
+          v-if="custom_input || (!param?.options && !param?.bitmask)"
+          v-model="internal_new_value_as_string"
+          dense
+          type="number"
+          :step="param.increment ?? 0.01"
+          :suffix="param.units"
+          :rules="forcing_input ? [] : [isInRange, isValidType]"
+          :loading="waiting_for_param_update"
+          @blur="updateVariables"
+          @input="internal_new_value = parseFloat(internal_new_value_as_string)"
+        >
+          <template #label>
+            <parameter-label :label="label ?? 'Enter a value'" :param="param" :format-options="formatOptions" />
+          </template>
+        </v-text-field>
+      </div>
+    </div>
 
     <v-checkbox
       v-if="show_advanced_checkbox"
@@ -66,8 +89,13 @@ import mavlink2rest from '@/libs/MAVLink2Rest'
 import autopilot_data from '@/store/autopilot'
 import Parameter from '@/types/autopilot/parameter'
 
+import ParameterLabel from './ParameterLabel.vue'
+
 export default Vue.extend({
   name: 'InlineParameterEditor',
+  components: {
+    ParameterLabel,
+  },
   model: {
     prop: 'newValue',
     event: 'change',
@@ -86,8 +114,12 @@ export default Vue.extend({
       default: false,
     },
     label: {
-      type: String,
-      default: '',
+      type: String as PropType<string | undefined>,
+      default: undefined,
+    },
+    autoRefreshParams: {
+      type: Boolean,
+      default: false,
     },
   },
   data() {
@@ -97,7 +129,9 @@ export default Vue.extend({
       // Form can't be computed correctly, so we save it's state under data
       is_form_valid: false,
       internal_new_value: 0,
+      internal_new_value_as_string: '',
       selected_bitflags: [] as number[],
+      last_sent_value: undefined as number | undefined,
     }
   },
   computed: {
@@ -123,15 +157,28 @@ export default Vue.extend({
       if (!this.autoSet) {
         return false
       }
-      return this.param.value !== this.internal_new_value
+      // Don't show loading state if the value was just set and we're waiting for vehicle to catch up
+      if (!this.last_sent_value || this.internal_new_value === this.last_sent_value) {
+        return false
+      }
+      return this.param?.value !== this.internal_new_value
     },
     param_value() {
       return this.param?.value ?? 0
+    },
+    formatOptions(): string {
+      if (!this.param?.options) {
+        return ''
+      }
+      return Object.entries(this.param.options)
+        .map(([value, name]) => `${value}: ${name}`)
+        .join(', ')
     },
   },
   watch: {
     param(newParam) {
       this.internal_new_value = newParam?.value ?? 0
+      this.internal_new_value_as_string = this.internal_new_value.toString()
     },
     is_form_valid(valid) {
       this.$emit('form-valid-change', valid)
@@ -140,6 +187,9 @@ export default Vue.extend({
       }
     },
     internal_new_value() {
+      if (this.autoSet) {
+        this.saveEditedParam()
+      }
       this.$emit('change', this.internal_new_value)
     },
     selected_bitflags() {
@@ -148,6 +198,9 @@ export default Vue.extend({
     },
     param_value() {
       this.updateSelectedFlags()
+      if (this.last_sent_value === undefined) {
+        this.internal_new_value = this.param_value
+      }
     },
   },
   mounted() {
@@ -239,7 +292,11 @@ export default Vue.extend({
       if (this.param?.rebootRequired) {
         autopilot_data.setRebootRequired(false)
       }
+      this.last_sent_value = value
       mavlink2rest.setParam(this.param.name, value, autopilot_data.system_id, this.param.paramType.type)
+      if (this.autoRefreshParams) {
+        autopilot_data.reset()
+      }
     },
     updateVariables(): void {
       // Select custom input if value is outside of possible options
@@ -248,6 +305,9 @@ export default Vue.extend({
         this.custom_input = !Object.keys(this.param?.options ?? [])
           .map((value) => parseFloat(value))
           .includes(this.internal_new_value)
+      }
+      if (this.param?.value) {
+        this.internal_new_value_as_string = this.internal_new_value.toString()
       }
 
       this.saveEditedParam()

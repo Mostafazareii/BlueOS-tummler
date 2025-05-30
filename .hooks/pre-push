@@ -41,16 +41,17 @@ command -v parallel >/dev/null 2>&1 || {
     exit 1
 }
 
+nginxVersion=1.22.1
+docker run --rm -v ${PWD}/core/tools/nginx/:/nginx/:ro nginx:$nginxVersion nginx -c /nginx/nginx.conf -t
+
 poetry install
 . "$(poetry env info --path)/bin/activate"
 
 # download some required files if they are not present
-echo "installing mavlink-router"
-./core/tools/mavlink_router/bootstrap.sh
-echo "installing mavp2p"
-./core/tools/mavp2p/bootstrap.sh
+echo "installing mavlink-server"
+./core/tools/mavlink_server/bootstrap.sh
 echo "installing ardupilot_tools"
-NOSUDO=1 ./core/tools/ardupilot_tools/bootstrap.sh
+NOSUDO=1 ./core/tools/ardupilot_tools/bootstrap.sh && ./core/tools/ardupilot_tools/setup-python-libs.sh
 
 isort_extra_args="--check-only --diff"
 black_extra_args="--check --diff"
@@ -120,6 +121,6 @@ echo "Running mypy.."
 git ls-files '*setup.py' | parallel 'mypy $(dirname {}) --cache-dir "$(dirname {})/__mypycache__"'
 
 echo "Running pytest.."
-pytest -n 10 --cov="$repository_path" --cov-report html
+pytest -n 10 --durations=0 --cov="$repository_path" --cov-report html
 
 exit 0

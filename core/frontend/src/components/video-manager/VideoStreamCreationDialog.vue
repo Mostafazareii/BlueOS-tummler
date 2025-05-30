@@ -27,6 +27,7 @@
             label="Encoding"
             :disabled="is_redirect_source"
             :rules="[validate_required_field]"
+            @change="change_endpoints_from_encode($event)"
           />
           <v-select
             v-model="selected_size"
@@ -164,7 +165,7 @@ import settings from '@/libs/settings'
 import beacon from '@/store/beacon'
 import {
   CreatedStream, Device, Format, FrameInterval, Size, StreamPrototype, StreamType, VideoCaptureType,
-  VideoEncodeType,
+  VideoEncodeTypeEnum,
 } from '@/types/video'
 import { VForm } from '@/types/vuetify'
 import {
@@ -276,11 +277,11 @@ export default Vue.extend({
       const match_format = this.device.formats.find((format) => format.encode === this.selected_encode)
       return match_format === undefined ? null : match_format
     },
-    available_encodes(): {text: string, value: VideoEncodeType}[] {
+    available_encodes(): {text: string, value: VideoEncodeTypeEnum}[] {
       // Filter out any unknown encode types
       const supported_formats = this.device.formats.filter((format) => typeof format.encode === 'string')
       return supported_formats.map((format) => ({
-        text: format.encode, value: format.encode,
+        text: format.encode as VideoEncodeTypeEnum, value: format.encode as VideoEncodeTypeEnum,
       }))
     },
     available_sizes(): {text: string, value: Size}[] {
@@ -311,10 +312,7 @@ export default Vue.extend({
     },
   },
   mounted() {
-    // Set default address if stream has no endpoints
-    if (this.stream_endpoints[0].isEmpty()) {
-      this.set_default_address_for_stream(0, StreamType.UDP)
-    }
+    this.set_default_configurations()
   },
   methods: {
     validate_required_field(input: string | null): (true | string) {
@@ -389,6 +387,7 @@ export default Vue.extend({
       if (endpoint.startsWith('rtsp://')) return StreamType.RTSP
       if (endpoint.startsWith('rtspt://')) return StreamType.RTSPT
       if (endpoint.startsWith('rtsph://')) return StreamType.RTSPH
+      if (endpoint.startsWith('udp265://')) return StreamType.UDP265
       return StreamType.UDP
     },
     availableStreamTypes(endpoint: string): {text: StreamType, pirate: boolean, desc?: string}[] {
@@ -397,6 +396,7 @@ export default Vue.extend({
       const protocols = [
         { text: StreamType.RTSP, pirate: false },
         { text: StreamType.UDP, pirate: false },
+        { text: StreamType.UDP265, pirate: false },
       ]
 
       const pirateModeProtocols = [
@@ -418,12 +418,34 @@ export default Vue.extend({
 
       return protocols
     },
+    change_endpoints_from_encode(encode: VideoEncodeTypeEnum) {
+      this.stream_endpoints = this.stream_endpoints.map((endpoint) => {
+        if (encode === VideoEncodeTypeEnum.H264) {
+          if (endpoint.includes('udp265://')) {
+            return endpoint.replace('udp265://', 'udp://')
+          }
+        }
+
+        if (encode === VideoEncodeTypeEnum.H265) {
+          if (endpoint.includes('udp://')) {
+            return endpoint.replace('udp://', 'udp265://')
+          }
+        }
+        return endpoint
+      })
+    },
     set_default_address_for_stream(index: number, stream_type: StreamType) {
       switch (stream_type) {
         case StreamType.UDP:
           if (!this.stream_endpoints[index].includes('udp://')) {
             // Vue.set() forces the update of a nested property
             Vue.set(this.stream_endpoints, index, `udp://${this.user_ip_address}:${5600 + index}`)
+          }
+          break
+        case StreamType.UDP265:
+          if (!this.stream_endpoints[index].includes('udp265://')) {
+            // Vue.set() forces the update of a nested property
+            Vue.set(this.stream_endpoints, index, `udp265://${this.user_ip_address}:${5600 + index}`)
           }
           break
         case StreamType.RTSP:
@@ -444,6 +466,38 @@ export default Vue.extend({
           break
         default:
           break
+      }
+    },
+    set_default_configurations() {
+      const is_fake = this.device.name.toLowerCase().startsWith('fake')
+
+      if (this.selected_encode === undefined) {
+        const default_encode = this.available_encodes.first()
+
+        if (default_encode !== undefined) {
+          this.selected_encode = default_encode.value
+        }
+      }
+
+      if (this.selected_size === null) {
+        const default_size = is_fake ? this.available_sizes.last() : this.available_sizes.first()
+
+        if (default_size !== undefined) {
+          this.selected_size = default_size.value
+        }
+      }
+
+      if (this.selected_interval === undefined) {
+        const default_interval = is_fake ? this.available_framerates.last() : this.available_framerates.first()
+
+        if (default_interval !== undefined) {
+          this.selected_interval = default_interval.value
+        }
+      }
+
+      // Set default address if stream has no endpoints
+      if (!this.device.name.toLocaleLowerCase().startsWith('redirect') && this.stream_endpoints[0].isEmpty()) {
+        this.set_default_address_for_stream(0, StreamType.UDP)
       }
     },
   },

@@ -221,6 +221,7 @@
 </template>
 
 <script lang="ts">
+import * as Sentry from '@sentry/vue'
 import semver from 'semver'
 import stable from 'semver-stable'
 import Vue, { PropType } from 'vue'
@@ -296,7 +297,11 @@ export default Vue.extend({
       const current_version = new semver.SemVer(this.extension.tag)
       // if is stable (which implies major >= 1), show latest stable
       if (stable.is(this.extension.tag) && current_version.major > 0) {
-        return stable.max(versions) === this.extension.tag ? false : stable.max(versions)
+        const latest = stable.max(versions)
+        if (semver.compare(this.extension.tag, latest) >= 0) {
+          return false
+        }
+        return latest
       }
       // show the latest version regardless of stability
       // eslint-disable-next-line no-extra-parens
@@ -339,11 +344,18 @@ export default Vue.extend({
       const permissions_str = this.extension.user_permissions
         ? this.extension.user_permissions : this.extension.permissions
       const permissions = JSON.parse(permissions_str)
-      const period = permissions.HostConfig?.CpuPeriod
-      const quota = permissions.HostConfig?.CpuQuota
+      const period = permissions?.HostConfig?.CpuPeriod
+      const quota = permissions?.HostConfig?.CpuQuota
       if (quota && period) {
         return quota / (period * this.cpus * 0.01)
       }
+
+      Sentry.captureMessage('Invalid permissions data', {
+        level: 'warning',
+        extra: {
+          permissions,
+        },
+      })
       return 100
     },
     getStatus(): string {

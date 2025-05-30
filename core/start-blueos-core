@@ -17,9 +17,15 @@ MAV_COMPONENT_ID_ONBOARD_COMPUTER4=194
 # Enable Rust backtrace for all programs
 RUST_BACKTRACE=1
 
-RUN_AS_REGULAR_USER="sudo -u blueos"
+RUN_AS_REGULAR_USER_BEGIN="sudo -u blueos bash -c \"source /etc/blueosrc && "
+RUN_AS_REGULAR_USER_END="\""
 # Set BlueOS log folder
 BLUEOS_LOG_FOLDER_PATH="/var/logs/blueos"
+
+# Make sure the BLUEOS_DISABLE_SERVICES is set
+BLUEOS_DISABLE_SERVICES=${BLUEOS_DISABLE_SERVICES:-""}
+# Replace spaces with commas in the disabled services list
+BLUEOS_DISABLE_SERVICES=${BLUEOS_DISABLE_SERVICES// /,}
 
 # The system may start with full disk, in this case resulting in an unstable behavior.
 # As an attempt to recover the system, lets delete the log files before current boot
@@ -101,26 +107,27 @@ find /usr/blueos/userdata -type f -exec chmod a+rw {} \;
 PRIORITY_SERVICES=(
     'autopilot',0,"nice --19 $SERVICES_PATH/ardupilot_manager/main.py"
     'cable_guy',0,"$SERVICES_PATH/cable_guy/main.py"
-    'video',0,"nice --19 mavlink-camera-manager --default-settings BlueROVUDP --mavlink tcpout:127.0.0.1:5777 --mavlink-system-id $MAV_SYSTEM_ID --gst-feature-rank omxh264enc=0,v4l2h264enc=250,x264enc=260 --log-path /var/logs/blueos/services/mavlink-camera-manager --verbose"
-    'mavlink2rest',0,"mavlink2rest --connect=udpout:127.0.0.1:14001 --server 0.0.0.0:6040 --system-id $MAV_SYSTEM_ID --component-id $MAV_COMPONENT_ID_ONBOARD_COMPUTER4"
+    'video',0,"nice --19 mavlink-camera-manager --default-settings BlueROVUDP --mavlink tcpout:127.0.0.1:5777 --mavlink-system-id $MAV_SYSTEM_ID --mavlink-camera-component-id-range=100-105 --gst-feature-rank omxh264enc=0,v4l2h264enc=250,x264enc=260 --log-path /var/logs/blueos/services/mavlink-camera-manager --stun-server stun://stun.l.google.com:19302 --verbose"
+    'mavlink2rest',0,"mavlink2rest --connect=udpout:127.0.0.1:14001 --server [::]:6040 --system-id $MAV_SYSTEM_ID --component-id $MAV_COMPONENT_ID_ONBOARD_COMPUTER4"
 )
 
 SERVICES=(
     # This services are not prioritized because they are not fundamental for the vehicle to work
     'kraken',0,"nice -19 $SERVICES_PATH/kraken/main.py"
     'wifi',0,"nice -19 $SERVICES_PATH/wifi/main.py --socket wlan0"
+    'zenohd',0,"ZENOH_BACKEND_FS_ROOT=$TOOLS_PATH/zenoh zenohd -c $TOOLS_PATH/zenoh/blueos-zenoh.json5"
     # This services are not as important as the others
     'beacon',250,"$SERVICES_PATH/beacon/main.py"
-    'bridget',0,"nice -19 $RUN_AS_REGULAR_USER $SERVICES_PATH/bridget/main.py"
+    'bridget',0,"nice -19 $RUN_AS_REGULAR_USER_BEGIN $SERVICES_PATH/bridget/main.py $RUN_AS_REGULAR_USER_END"
     'commander',250,"$SERVICES_PATH/commander/main.py"
-    'nmea_injector',250,"nice -19 $SERVICES_PATH/nmea_injector/nmea_injector/main.py"
+    'nmea_injector',250,"nice -19 $SERVICES_PATH/nmea_injector/main.py"
     'helper',250,"$SERVICES_PATH/helper/main.py"
     'iperf3',250," iperf3 --server --port 5201"
     'linux2rest',250,"linux2rest --log-path /var/logs/blueos/services/linux2rest --log-settings netstat=30,platform=10,serial-ports=10,system-cpu=10,system-disk=30,system-info=10,system-memory=10,system-network=10,system-process=60,system-temperature=10,system-unix-time-seconds=10"
     'filebrowser',250,"nice -19 filebrowser --database /etc/filebrowser/filebrowser.db --baseurl /file-browser"
     'versionchooser',250,"$SERVICES_PATH/versionchooser/main.py"
     'pardal',250,"nice -19 $SERVICES_PATH/pardal/main.py"
-    'ping',0,"nice -19 $RUN_AS_REGULAR_USER $SERVICES_PATH/ping/main.py"
+    'ping',0,"nice -19 $RUN_AS_REGULAR_USER_BEGIN $SERVICES_PATH/ping/main.py $RUN_AS_REGULAR_USER_END"
     'user_terminal',0,"cat /etc/motd"
     'ttyd',250,'nice -19 ttyd -p 8088 sh -c "/usr/bin/tmux attach -t user_terminal || /usr/bin/tmux new -s user_terminal"'
     'nginx',250,"nice -18 nginx -g \"daemon off;\" -c $TOOLS_PATH/nginx/nginx.conf"
@@ -152,15 +159,17 @@ function create_service {
     # Set all necessary environment variables for the new tmux session
     for NAME in $(compgen -v | grep -e MAV_ -e BLUEOS_); do
         VALUE=${!NAME}
-        tmux setenv -t $SESSION_NAME -g $NAME $VALUE
+        tmux setenv -t "$SESSION_NAME" -g "$NAME" "$VALUE"
     done
 
     # Use run_service to start the service with the memory limit
     tmux send-keys -t $SESSION_NAME "run-service '$SERVICE_NAME' '$command' $memory_limit_mb " C-m
 }
 
+SSH_USER=${SSH_USER:-pi}
+
 ssh_command() {
-  ssh -i /root/.config/.ssh/id_rsa -o StrictHostKeyChecking=no pi@localhost "$1"
+  ssh -i /root/.config/.ssh/id_rsa -o StrictHostKeyChecking=no $SSH_USER@localhost "$1"
 }
 
 prepare_cgroups() {
@@ -184,7 +193,7 @@ prepare_cgroups() {
   # Export the full path
   export DOCKER_CGROUP=$FULL_PATH
 
-  # populated cgroups cannot be changed, so, in order to enable subtree_control, 
+  # populated cgroups cannot be changed, so, in order to enable subtree_control,
   # we need to create a new child cgroup andmove all processes of this cgroup to it
   # (as only empty cgroups can be changed).
 

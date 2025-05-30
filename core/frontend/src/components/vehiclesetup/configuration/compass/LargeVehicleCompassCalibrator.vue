@@ -9,7 +9,7 @@
         v-bind="attrs"
         v-on="on"
       >
-        Run Large Vehicle Calibration
+        Start Large Vehicle Calibration
       </v-btn>
     </template>
 
@@ -18,7 +18,7 @@
         Large Vehicle Compass Calibration
       </v-card-title>
       <v-card-text>
-        A Valid position is required for Compass Learn to estimate the local world magnetic field.
+        A valid global region/position is required to estimate the local world magnetic field.
         <auto-coordinate-detector
           v-model="coordinates"
         />
@@ -33,7 +33,7 @@
         <StatusTextWatcher :style="`display : ${status_type === 'error' ? 'block' : 'none'};`" />
       </v-card-text>
       <v-card-actions class="justify-center">
-        <v-btn color="primary" :disabled="calibrating || !compass_mask" @click="calibrate()">
+        <v-btn color="primary" :disabled="calibrating || !compass_mask || !coordinates" @click="calibrate()">
           Calibrate
         </v-btn>
         <reboot-button />

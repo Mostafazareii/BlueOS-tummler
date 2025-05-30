@@ -4,6 +4,14 @@
       max-width="1000"
       class="mx-auto"
     >
+      <v-dialog
+        v-model="show_docker_login_dialog"
+        max-width="450"
+      >
+        <DockerLogin
+          @cancel="show_docker_login_dialog = false"
+        />
+      </v-dialog>
       <v-card
         v-if="!settings.is_pirate_mode"
         max-width="900"
@@ -59,7 +67,7 @@
           :current="image.tag === current_version?.tag && image.repository === current_version?.repository"
           :bootstrap-version="bootstrap_version"
           :update-available="updateIsAvailable(image)"
-          :deleting="deleting.endsWith(image.tag)"
+          :deleting="isBeingDeleted(image)"
           :enable-delete="local_versions.result.local.length > 2"
           @delete="deleteVersion"
           @apply="setVersion"
@@ -77,7 +85,15 @@
         max-width="900"
         class="mx-auto my-12 pa-4"
       >
-        <h2>Remote Versions</h2>
+        <div class="d-flex justify-space-between pb-3">
+          <h2>Remote Versions</h2>
+          <v-btn
+            color="primary"
+            @click="show_docker_login_dialog = true"
+          >
+            Docker Login
+          </v-btn>
+        </div>
         <v-form
           @submit.prevent="loadVersions()"
         >
@@ -139,7 +155,7 @@
       <h2>Manual upload</h2>
       Use this to upload a .tar docker image. These can be downloaded from
       <a
-        href="https://github.com/bluerobotics/BlueOS-docker/actions/workflows/test-and-deploy.yml"
+        href="https://github.com/bluerobotics/BlueOS/actions/workflows/test-and-deploy.yml"
         target="_blank"
       >Github's CI</a>
       or generated locally using "docker save"
@@ -201,6 +217,7 @@ import Notifier from '@/libs/notifier'
 import settings from '@/libs/settings'
 import helper from '@/store/helper'
 import { version_chooser_service } from '@/types/frontend_services'
+import { InternetConnectionState } from '@/types/helper'
 import {
   isServerResponse,
   LocalVersionsQuery, Version, VersionsQuery, VersionType,
@@ -211,6 +228,7 @@ import PullTracker from '@/utils/pull_tracker'
 import * as VCU from '@/utils/version_chooser'
 
 import SpinningLogo from '../common/SpinningLogo.vue'
+import DockerLogin from './DockerLogin.vue'
 import VersionCard from './VersionCard.vue'
 
 const notifier = new Notifier(version_chooser_service)
@@ -218,6 +236,7 @@ const notifier = new Notifier(version_chooser_service)
 export default Vue.extend({
   name: 'VersionChooser',
   components: {
+    DockerLogin,
     SpinningLogo,
     VersionCard,
     PullProgress,
@@ -257,6 +276,7 @@ export default Vue.extend({
       selected_image: default_repository,
       deleting: '', // image currently being deleted, if any
       file_input_error: '',
+      show_docker_login_dialog: false,
     }
   },
   computed: {
@@ -270,7 +290,7 @@ export default Vue.extend({
       return 'File is required'
     },
     has_internet(): boolean {
-      return helper.has_internet
+      return helper.has_internet !== InternetConnectionState.OFFLINE
     },
   },
   watch: {
@@ -646,6 +666,9 @@ export default Vue.extend({
       }
       this.latest_stable = undefined
       this.latest_beta = undefined
+    },
+    isBeingDeleted(image: Version) {
+      return this.deleting === `${image.repository}:${image.tag}`
     },
   },
 })

@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#! /usr/bin/env python3
 
 import asyncio
 import gzip
@@ -7,11 +7,13 @@ import json
 import logging
 import re
 import socket
+import subprocess
 from concurrent import futures
 from datetime import datetime
 from enum import Enum
 from functools import cache
 from io import BytesIO
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Union
 from urllib.parse import urlparse
 from uuid import UUID
@@ -27,6 +29,7 @@ from commonwealth.utils.general import (
 )
 from commonwealth.utils.logs import InterceptHandler, init_logger
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import HTMLResponse
 from fastapi_versioning import VersionedFastAPI, version
 from loguru import logger
 from pydantic import BaseModel
@@ -103,6 +106,8 @@ class ServiceMetadata(BaseModel):
     avoid_iframes: Optional[bool]
     api: str
     sanitized_name: Optional[str]
+    works_in_relative_paths: Optional[bool]
+    extras: Optional[Dict[str, str]]
 
 
 class ServiceInfo(BaseModel):
@@ -313,9 +318,9 @@ class Helper:
             "127.0.0.1", port=port, path="/", timeout=1.0, method="GET", follow_redirects=10
         )
         log_msg = f"Detecting service at port {port}"
-        if response.status != http.client.OK:
+        if response.status == http.client.BAD_REQUEST or response.decoded_data is None:
             # If not valid web server, documentation will not be available
-            logger.debug(f"{log_msg}: Invalid: {response.status} - {response.decoded_data}")
+            logger.debug(f"{log_msg}: Invalid: {response.status} - {response.decoded_data!r}")
             return info
 
         info.valid = True
@@ -428,7 +433,7 @@ class Helper:
 
         # Update our known services cache
         Helper.KNOWN_SERVICES.update(services)
-
+        Helper.update_nginx(services)
         return [service for service in Helper.KNOWN_SERVICES if service.valid]
 
     @staticmethod
@@ -452,6 +457,23 @@ class Helper:
         return website_status
 
     @staticmethod
+    def reload_nginx() -> None:
+        with open("/var/run/nginx.pid", "r", encoding="utf-8") as f:
+            pid = int(f.readline())
+            # kill -HUP is the right way of doing a graceful reload in Nginx
+            subprocess.run(["kill", "-HUP", f"{pid}"], check=False)
+
+    @staticmethod
+    def update_nginx(services: Set[ServiceInfo]) -> None:
+        changed = 0
+        for service in services:
+            if service.metadata:
+                if Helper.setup_nginx_route(service.metadata, service.port):
+                    changed += 1
+        if changed:
+            Helper.reload_nginx()
+
+    @staticmethod
     @temporary_cache(timeout_seconds=5)
     def check_internet_access() -> Dict[str, WebsiteStatus]:
         # 10 concurrent executors is fine here because its a very short/light task
@@ -460,6 +482,32 @@ class Helper:
             status_list = [task.result() for task in futures.as_completed(tasks)]
 
         return {status.site.name: status for status in status_list}
+
+    @staticmethod
+    def setup_nginx_route(metadata: ServiceMetadata, port: int) -> bool:
+        name = metadata.sanitized_name
+        text = f"""
+        location /extensionv2/{name}/ {{
+        proxy_pass http://127.0.0.1:{port}/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        }}
+        """
+        filename = f"/home/pi/tools/nginx/extensions/{name}.conf"
+        Path.mkdir(Path("/home/pi/tools/nginx/extensions/"), parents=True, exist_ok=True)
+        try:
+            with open(filename, "r", encoding="utf-8") as f:
+                if f.read() == text:
+                    return False
+        except Exception as e:
+            logging.info(f"file '{filename}' not found ({e}):, a new one will be created")
+        with open(filename, "w", encoding="utf-8") as f:
+            logging.info(f"updating nginx route for {name}")
+            f.write(text)
+            logging.info(f"file updated: {filename}")
+        return True
 
 
 fast_api_app = FastAPI(
@@ -531,11 +579,11 @@ def software_id() -> Any:
     summary="Check internet best server for test from BlueOS.",
 )
 @version(1, 0)
-async def internet_best_server() -> Any:
+async def internet_best_server(interface_addr: Optional[str] = None) -> Any:
     # Since we are finding a new server, clear previous results
     # pylint: disable=global-statement
     global SPEED_TEST
-    SPEED_TEST = Speedtest(secure=True)
+    SPEED_TEST = Speedtest(secure=True, source_address=interface_addr)
     SPEED_TEST.get_best_server()
     return SPEED_TEST.results.dict()
 
@@ -578,6 +626,20 @@ async def internet_test_previous_result() -> Any:
     return SPEED_TEST.results.dict()
 
 
+@fast_api_app.get(
+    "/ping",
+    summary="Ping a server using a specific interface.",
+)
+@version(1, 0)
+async def ping(host: str, interface_addr: Optional[str] = None) -> bool:
+    iface = ["-I", interface_addr] if interface_addr else []
+    process = await asyncio.create_subprocess_exec(
+        "ping", "-c", "1", *iface, host, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+    )
+    await process.communicate()
+    return process.returncode == 0
+
+
 async def periodic() -> None:
     while True:
         await asyncio.sleep(60)
@@ -599,6 +661,19 @@ app = VersionedFastAPI(
     prefix_format="/v{major}.{minor}",
     enable_latest=True,
 )
+
+
+@app.get("/")
+async def root() -> HTMLResponse:
+    html_content = """
+    <html>
+        <head>
+            <title>Helper</title>
+        </head>
+    </html>
+    """
+    return HTMLResponse(content=html_content, status_code=200)
+
 
 port_to_service_map: Dict[int, str] = parse_nginx_file("/home/pi/tools/nginx/nginx.conf")
 

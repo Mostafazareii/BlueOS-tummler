@@ -2,12 +2,12 @@
 
 # Set desired version to be installed
 VERSION="${VERSION:-master}"
-GITHUB_REPOSITORY=${GITHUB_REPOSITORY:-bluerobotics/blueos-docker}
-DOCKER_USER=${DOCKER_USER:-$(echo $GITHUB_REPOSITORY | cut -d'/' -f1)}
+GITHUB_REPOSITORY=${GITHUB_REPOSITORY:-bluerobotics/BlueOS}
+DOCKER_USER=${DOCKER_USER:-$(echo $GITHUB_REPOSITORY | cut -d'/' -f1 | tr '[:upper:]' '[:lower:]')}
 REMOTE="${REMOTE:-https://raw.githubusercontent.com/${GITHUB_REPOSITORY}}"
 ROOT="$REMOTE/$VERSION"
 
-alias curl="curl --retry 6 --max-time 15 --retry-all-errors"
+alias curl="curl --retry 6 --max-time 15 --retry-all-errors --retry-delay 20 --connect-timeout 60"
 
 # Additional options
 DO_BOARD_CONFIG=1 # default to do the board config
@@ -170,7 +170,7 @@ test $NO_CLEAN || (
 )
 
 # Start installing necessary files and system configuration
-echo "Going to install blueos-docker version ${VERSION}."
+echo "Going to install BlueOS version ${VERSION}."
 
 echo "Downloading and installing udev rules."
 curl -fsSL $ROOT/install/udev/100.autopilot.rules -o /etc/udev/rules.d/100.autopilot.rules
@@ -226,8 +226,14 @@ docker create \
     -e BLUEOS_CONFIG_PATH=$HOME/.config/blueos \
     $BLUEOS_BOOTSTRAP
 
-# add docker entry to rc.local
-sed -i "\%^exit 0%idocker start blueos-bootstrap" /etc/rc.local || echo "Failed to add docker start on rc.local, BlueOS will not start on boot!"
+# Ensure docker can run without sudo
+groupadd docker || true
+usermod -aG docker pi || true
+
+# Create service to start blueos-bootstrap container on boot
+curl -fsSL "$ROOT/install/configs/blueos.service" -o /etc/systemd/system/blueos.service
+systemctl start blueos
+systemctl enable blueos
 
 # Configure network settings
 ## This should be after everything, otherwise network problems can happen
@@ -247,7 +253,10 @@ echo "Restarting random-seeds."
 rm -rf /var/lib/systemd/random-seed /loader/random-seed
 
 echo "creating dns link"
-sudo ln /etc/resolv.conf /etc/resolv.conf.host
+sudo ln --force /etc/resolv.conf /etc/resolv.conf.host
+
+echo "disabling NetworkManager-wait-online.service"
+systemctl disable NetworkManager-wait-online.service || true
 
 echo "Installation finished successfully."
 echo "You can access after the reboot:"

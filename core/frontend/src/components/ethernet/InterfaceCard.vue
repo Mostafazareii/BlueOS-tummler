@@ -67,15 +67,19 @@
           >
             Disable <br> DHCP server
           </v-btn>
-          <v-btn
+          <span
             v-else
-            small
-            class="ma-2 px-2 py-5 elevation-1"
-            :disabled="!is_static_ip_present"
-            @click="openDHCPServerDialog"
+            v-tooltip="!is_static_ip_present ? 'A static IP address is required to enable DHCP server.' : undefined"
           >
-            Enable <br> DHCP server
-          </v-btn>
+            <v-btn
+              small
+              class="ma-2 px-2 py-5 elevation-1"
+              :disabled="!is_static_ip_present"
+              @click="openDHCPServerDialog"
+            >
+              Enable <br> DHCP server
+            </v-btn>
+          </span>
         </v-row>
       </v-container>
     </v-expansion-panel-content>
@@ -132,7 +136,9 @@ export default Vue.extend({
       return this.is_connected ? 'Connected' : 'Not connected'
     },
     is_there_dhcp_server_already(): boolean {
-      return this.adapter.addresses.some((address) => address.mode === AddressMode.server)
+      return this.adapter.addresses.some(
+        (address) => [AddressMode.server, AddressMode.backupServer].includes(address.mode),
+      )
     },
     is_static_ip_present(): boolean {
       return this.adapter.addresses.some((address) => address.mode === AddressMode.unmanaged)
@@ -186,6 +192,7 @@ export default Vue.extend({
         case AddressMode.client: return 'Dynamic IP'
         case AddressMode.server: return 'DHCP Server'
         case AddressMode.unmanaged: return 'Static IP'
+        case AddressMode.backupServer: return 'Backup DHCP Server'
         default: return 'Undefined mode'
       }
     },

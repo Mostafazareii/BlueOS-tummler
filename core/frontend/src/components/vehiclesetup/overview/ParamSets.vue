@@ -73,6 +73,7 @@ import { SemVer } from 'semver'
 import Vue from 'vue'
 
 import * as AutopilotManager from '@/components/autopilot/AutopilotManagerUpdater'
+import { fetchCurrentBoard } from '@/components/autopilot/AutopilotManagerUpdater'
 import ParameterLoader from '@/components/parameter-editor/ParameterLoader.vue'
 import mavlink2rest from '@/libs/MAVLink2Rest'
 import {
@@ -124,7 +125,8 @@ export default Vue.extend({
       for (const string of [fw_patch, fw_minor, fw_major]) {
         fw_params = Object.fromEntries(
           Object.entries(this.all_param_sets).filter(
-            ([name]) => name.toLocaleLowerCase().includes(string.toLowerCase()),
+            // We add a trailing slash to avoid matching Navigator and Navigator64, or any board with suffix
+            ([name]) => name.toLocaleLowerCase().includes(`${string.toLowerCase()}/`),
           ),
         )
         if (Object.keys(fw_params).length > 0) {
@@ -137,6 +139,7 @@ export default Vue.extend({
     },
   },
   mounted() {
+    fetchCurrentBoard()
     this.loadParamSets()
   },
   methods: {

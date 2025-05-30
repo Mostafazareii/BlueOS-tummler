@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#! /usr/bin/env python3
 import argparse
 import asyncio
 import itertools
@@ -113,7 +113,12 @@ class Beacon:
         for interface in self.manager.settings.interfaces:
             match InterfaceType.guess_from_name(interface.name):
                 case InterfaceType.WIRED | InterfaceType.USB:
-                    interface.domain_names = [hostname, self.DEFAULT_HOSTNAME]  # let's keep our default just in case
+                    interface.domain_names = [
+                        old_name.replace(self.DEFAULT_HOSTNAME, hostname) for old_name in interface.domain_names
+                    ]
+                    # Let's keep our default just in case
+                    if self.DEFAULT_HOSTNAME not in interface.domain_names:
+                        interface.domain_names.append(self.DEFAULT_HOSTNAME)
                 case InterfaceType.WIFI:
                     interface.domain_names = [f"{hostname}-wifi"]
                 case InterfaceType.HOTSPOT:
@@ -219,7 +224,7 @@ class Beacon:
                             runner.add_services(self.create_async_service_infos(interface, service, domain, ip))
                         except ValueError as e:
                             logger.warning(f"Error adding service for {interface.name}-{service}: {e}, skipping.")
-                    runners[f"{interface_name}-{domain}"] = runner
+                    runners[f"{interface_name}-{domain}-{ip}"] = runner
         return runners
 
     async def run(self) -> None:

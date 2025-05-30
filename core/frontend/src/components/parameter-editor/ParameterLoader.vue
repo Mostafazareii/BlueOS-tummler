@@ -1,21 +1,20 @@
 <template>
   <v-dialog
     v-model="should_open"
-    width="fit-content"
     max-width="80%"
+    min-width="60%"
     @click:outside="done"
   >
     <v-card>
       <v-card-title class="pt-6">
         Loading Parameters
       </v-card-title>
-      <v-card-text v-if="Object.keys(different_param_set).length !== 0">
+      <v-card-text v-if="different_param_set_length !== 0" height="80%">
         <v-row class="virtual-table-row">
           <v-col class="virtual-table-cell checkbox-cell">
             <v-checkbox
               ref="selectAllCheckbox"
               v-model="select_all"
-              class="virtual-table-cell"
               label="Write"
               :disabled="writing"
               :indeterminate="select_all === null"
@@ -25,23 +24,23 @@
           <v-col class="virtual-table-cell name-cell">
             <strong>Name</strong>
           </v-col>
-          <v-col class="virtual-table-cell">
+          <v-col class="virtual-table-cell value-cell">
             <strong>Value</strong>
           </v-col>
-          <v-col class="virtual-table-cell">
+          <v-col class="virtual-table-cell value-cell">
             <strong>New Value</strong>
           </v-col>
         </v-row>
         <!-- display all parameters in a concise table using virtual scroller -->
         <v-virtual-scroll
+          :bench="100"
           :items="parametersFromSet(different_param_set)"
-          height="300"
-          item-height="30"
-          class="virtual-table"
+          :item-height="30"
+          :max-height="500"
         >
           <template #default="{ item }">
             <v-row class="virtual-table-row">
-              <v-col class="virtual-table-cell">
+              <v-col class="virtual-table-cell checkbox-cell">
                 <v-checkbox
                   v-model="param_checkboxes[item.name]"
                   class="checkbox-label checkbox-cell"
@@ -49,7 +48,7 @@
                 />
               </v-col>
               <v-col class="virtual-table-cell name-cell">
-                <v-tooltip bottom>
+                <v-tooltip bottom open-delay="1000">
                   <template #activator="{ on }">
                     <div :style="!item.current ? { color: 'var(--v-warning-base)' } : {}" v-on="on">
                       {{ item.name }}
@@ -64,8 +63,8 @@
                   </span>
                 </v-tooltip>
               </v-col>
-              <v-col class="virtual-table-cell">
-                <v-tooltip :disabled="!item.current" bottom>
+              <v-col class="virtual-table-cell value-cell">
+                <v-tooltip :disabled="!item.current" bottom open-delay="1000">
                   <template #activator="{ on }">
                     <div
                       class="large-text-cell"
@@ -79,8 +78,8 @@
                   </span>
                 </v-tooltip>
               </v-col>
-              <v-col class="virtual-table-cell">
-                <v-tooltip bottom>
+              <v-col class="virtual-table-cell value-cell">
+                <v-tooltip bottom open-delay="1000">
                   <template #activator="{ on }">
                     <div
                       class="large-text-cell"
@@ -141,6 +140,7 @@
         >
           Write Parameters
         </v-btn>
+        <RebootButton v-if="error" />
       </v-card-actions>
     </v-card>
   </v-dialog>
@@ -150,12 +150,16 @@
 import Vue, { PropType } from 'vue'
 import { Dictionary } from 'vue-router'
 
+import RebootButton from '@/components/utils/RebootButton.vue'
 import mavlink2rest from '@/libs/MAVLink2Rest'
 import autopilot_data from '@/store/autopilot'
 import { printParamWithUnit } from '@/types/autopilot/parameter'
 
 export default Vue.extend({
   name: 'ParameterLoader',
+  components: {
+    RebootButton,
+  },
   props: {
     parameters: {
       type: Object as PropType<Dictionary<number>> | undefined,
@@ -252,6 +256,9 @@ export default Vue.extend({
     writeSelectedParams() {
       for (const [name, value] of Object.entries(this.user_selected_params)) {
         this.writeParam(name, value)
+        if (autopilot_data.parameter(name)?.rebootRequired) {
+          autopilot_data.setRebootRequired(true)
+        }
       }
     },
     writeParam(name: string, value: number) {
@@ -314,6 +321,8 @@ button {
 
 .virtual-table-row {
   display: flex;
+  flex: 1;
+  flex-grow: 1;
   margin: 0;
   margin-bottom: 15px;
   border-bottom: 1px solid #eee;
@@ -324,11 +333,12 @@ button {
   flex: 1;
   padding: 5px;
   height: 30px;
-  min-width: 150px;
 }
+
 .virtual-table-cell .v-input {
   margin-top: -6px;
 }
+
 .virtual-table-cell .large-text-cell {
   white-space: nowrap;
   overflow: hidden;
@@ -340,14 +350,21 @@ button {
 }
 
 .name-cell {
-  min-width: 200px;
+  flex-grow: 1;
+  min-width: 150px;
+}
+
+.value-cell {
+  flex-grow: 2;
+  min-width: 150px;
 }
 
 .checkbox-cell {
-  width: 50px;
+  min-width: 100px;
+  max-width: 100px;
 }
 
 .virtual-table {
-  overflow-x: hidden;
+  overflow: hidden;
 }
 </style>

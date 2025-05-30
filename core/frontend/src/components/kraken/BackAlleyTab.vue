@@ -238,6 +238,12 @@
           <v-card-title class="mb-5">
             {{ internet_offline ? 'Vehicle is not connected to the internet.' : 'Failed to fetch extension manifest.' }}
           </v-card-title>
+          <v-btn
+            color="primary"
+            @click="$emit('refresh')"
+          >
+            Try Again
+          </v-btn>
         </div>
       </v-container>
     </v-card>
@@ -276,6 +282,7 @@ import SpinningLogo from '@/components/common/SpinningLogo.vue'
 import StoreExtensionCard, { ImgProcessedResult } from '@/components/kraken/cards/StoreExtensionCard.vue'
 import { getLatestVersion } from '@/components/kraken/Utils'
 import helper from '@/store/helper'
+import { InternetConnectionState } from '@/types/helper'
 import { ExtensionData, InstalledExtensionData } from '@/types/kraken'
 
 enum AvailableSorts {
@@ -328,7 +335,7 @@ export default Vue.extend({
       return this.manifest_is_loading || this.manifest_has_error
     },
     internet_offline(): boolean {
-      return !helper.has_internet
+      return helper.has_internet === InternetConnectionState.OFFLINE
     },
     show_info_card(): boolean {
       return this.is_manifest_invalid || this.internet_offline

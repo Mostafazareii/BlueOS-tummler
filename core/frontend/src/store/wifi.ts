@@ -4,7 +4,7 @@ import {
 
 import store from '@/store'
 import {
-  Network, NetworkCredentials, SavedNetwork, WifiStatus,
+  Network, NetworkCredentials, SavedNetwork, WifiStatus, HotspotStatus
 } from '@/types/wifi'
 import { sorted_networks } from '@/utils/wifi'
 
@@ -25,11 +25,13 @@ class WifiStore extends VuexModule {
 
   network_status: WifiStatus | null = null
 
-  hotspot_status: boolean | null = null
+  hotspot_status: HotspotStatus | null = null
 
   smart_hotspot_status: boolean | null = null
 
   hotspot_credentials: NetworkCredentials | null = null
+
+  is_loading: boolean = true
 
   @Mutation
   setCurrentNetwork(network: Network | null): void {
@@ -38,6 +40,7 @@ class WifiStore extends VuexModule {
 
   @Mutation
   setAvailableNetworks(available_networks: Network[] | null): void {
+    this.is_loading = false
     this.available_networks = available_networks
   }
 
@@ -71,7 +74,7 @@ class WifiStore extends VuexModule {
   }
 
   @Mutation
-  setHotspotStatus(status: boolean | null): void {
+  setHotspotStatus(status: HotspotStatus | null): void {
     this.hotspot_status = status
   }
 
@@ -83,6 +86,11 @@ class WifiStore extends VuexModule {
   @Mutation
   setHotspotCredentials(credentials: NetworkCredentials | null): void {
     this.hotspot_credentials = credentials
+  }
+
+  @Mutation
+  setLoading(loading: boolean): void {
+    this.is_loading = loading
   }
 
   get connectable_networks(): Network[] | null {

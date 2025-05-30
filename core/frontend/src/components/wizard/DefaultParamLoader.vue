@@ -69,11 +69,11 @@
                     class="large-text-cell"
                     v-on="on"
                   >
-                    {{ item.current ? printParamWithUnit(item.current) : item.value }}
+                    {{ item.current ? printParamWithUnit(item.value) : item.value.value }}
                   </div>
                 </template>
                 <span>
-                  {{ item.current ? printParamWithUnit(item.current) : item.value }}
+                  {{ item.current ? printParamWithUnit(item.value) : item.value.value }}
                 </span>
               </v-tooltip>
             </v-col>
@@ -126,9 +126,9 @@ export default Vue.extend({
   }),
   computed: {
     filtered_param_sets(): Dictionary<Dictionary<number>> | undefined {
-      const fw_patch = `${this.vehicle}/${this.version}/${this.board}`
-      const fw_minor = `${this.vehicle}/${this.version?.major}.${this.version?.minor}/${this.board}`
-      const fw_major = `${this.vehicle}/${this.version?.major}/${this.board}`
+      const fw_patch = `${this.vehicle}/${this.version}/${this.board}/`
+      const fw_minor = `${this.vehicle}/${this.version?.major}.${this.version?.minor}/${this.board}/`
+      const fw_major = `${this.vehicle}/${this.version?.major}/${this.board}/`
 
       // returns a new dict where the keys start with the fullname
       // e.g. "ArduSub/BlueROV2/4.0.3" -> "ArduSub/BlueROV2/4.0.3/BlueROV2"
@@ -245,10 +245,15 @@ export default Vue.extend({
       return Object.entries(paramset).map(([name]) => {
         const currentParameter = autopilot_data.parameter(name)
 
+        const newParameter = {
+          ...currentParameter,
+          value: paramset[name],
+        }
+
         return {
           name,
           current: currentParameter,
-          value: paramset[name],
+          value: newParameter,
         }
       })
     },

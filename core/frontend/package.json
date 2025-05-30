@@ -14,8 +14,10 @@
     "lint": "eslint --max-warnings=0 --ext .js,.vue --ignore-path .gitignore --ignore-pattern src/components/vue-tour src"
   },
   "dependencies": {
+    "@eclipse-zenoh/zenoh-ts": "^1.3.4",
     "@google/model-viewer": "^3.0.0",
     "@mdi/font": "^7.1.96",
+    "@sentry/vite-plugin": "^3.2.2",
     "@sentry/vue": "^8.25.0",
     "@types/file-saver": "^2.0.5",
     "@types/lodash": "^4.14.175",
@@ -33,7 +35,7 @@
     "date-fns": "^2.23.0",
     "file-saver": "^2.0.5",
     "fuse.js": "^6.6.2",
-    "gl-matrix": "JoaoMario109/gl-matrix#v3.4.x-extended-package",
+    "gl-matrix": "joaomariolago/gl-matrix#v3.4.x-extended-package",
     "gsap": "^3.12.3",
     "http-status-codes": "^2.2.0",
     "image-js": "^0.35.3",
@@ -83,6 +85,7 @@
     "unplugin-vue-components": "^0.25.2",
     "vite": "3",
     "vite-plugin-pwa": "^0.16.5",
+    "vite-plugin-wasm": "^3.4.1",
     "vue-cli-plugin-vuetify": "~2.4.1",
     "vue-template-babel-compiler": "^2.0.0",
     "vuetify-loader": "^1.7.0",

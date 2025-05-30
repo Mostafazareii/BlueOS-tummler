@@ -9,7 +9,10 @@
         width="80%"
         class="my-4"
       />
-      <v-card class="align-center justify-center pa-6 d-block">
+      <v-card
+        v-if="available_routers.length > 1"
+        class="align-center justify-center pa-6 d-block"
+      >
         <v-card-title class="ma-0 pa-0 d-block">
           Mavlink Router
         </v-card-title>
@@ -24,9 +27,21 @@
           >
             <v-radio v-for="router in available_routers" :key="router" :label="router" :value="router" />
           </v-radio-group>
+          <v-alert
+            v-if="selected_router === 'MAVP2P'"
+            outline
+            text
+            dense
+            type="warning"
+          >
+            <p>
+              MAVP2P has been presenting issues and is not currently recommended.
+            </p>
+          </v-alert>
         </v-card-text>
       </v-card>
       <v-divider
+        v-if="available_routers.length > 1"
         width="80%"
         class="my-4"
       />

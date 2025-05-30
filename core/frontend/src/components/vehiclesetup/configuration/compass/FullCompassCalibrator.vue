@@ -9,7 +9,7 @@
         v-bind="attrs"
         v-on="on"
       >
-        Full Calibration
+        Start Full Calibration
       </v-btn>
     </template>
 
@@ -20,18 +20,18 @@
       <v-card-text class="pa-10">
         <span v-if="state === states.IDLE">
           <p>
-            <strong> Onboard Compass Calibration</strong> is the regular calibration used
-            for Ardupilot vehicles.
-            It requires you to spin the vehicle aroung all axis, which allows it to calibrated the
+            <strong>Onboard Compass Calibration</strong> is the regular calibration used
+            for ArduPilot vehicles.
+            It requires spinning the vehicle around all axes, which allows it to calibrate the
             readings to the expected local magnetic field.
           </p>
           <p>
-            A Valid position is <strong>recomended</strong> for Onboard Calibration to estimate the
-            local world magnetic field.
+            A valid global region/position is <strong>recomended</strong> for Onboard Calibration to
+            estimate the local world magnetic field.
           </p>
         </span>
         <span v-else-if="state === states.CALIBRATING">
-          Spin your vehicle around all of its axis until the progress bar completes.
+          Spin your vehicle around all of its axes until the progress bar completes.
         </span>
 
         <auto-coordinate-detector
@@ -78,16 +78,25 @@
       </v-card-text>
       <v-card-actions>
         <v-spacer />
-        <v-btn v-if="state !== states.CALIBRATING" color="primary" :disabled="!compass_mask" @click="calibrate()">
+        <v-btn
+          v-if="state !== states.CALIBRATING && state !== states.FAILED"
+          color="primary"
+          :disabled="!compass_mask || !coordinates"
+          @click="calibrate()"
+        >
           Calibrate
         </v-btn>
         <v-btn v-if="state === states.DONE" color="primary" @click="dismiss">
           Dismiss
         </v-btn>
         <RebootButton />
-        <v-btn color="red" :disabled="state !== states.CALIBRATING" @click="cancelCalibration()">
+        <v-btn v-if="state == states.CALIBRATING" color="red" @click="cancelCalibration()">
           Cancel
         </v-btn>
+        <v-btn v-if="state == states.FAILED" color="primary" @click="reset()">
+          Ok
+        </v-btn>
+        <v-spacer />
       </v-card-actions>
     </v-card>
   </v-dialog>
@@ -171,6 +180,11 @@ export default {
     this.progress_listener?.discard()
   },
   methods: {
+    reset() {
+      this.state = states.IDLE
+      this.cleanup()
+      this.fitness = {}
+    },
     dismiss() {
       this.state = states.IDLE
       this.dialog = false

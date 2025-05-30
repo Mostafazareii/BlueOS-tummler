@@ -70,6 +70,7 @@ class FirmwareDownloader:
         name = pathlib.Path(urlparse(url).path).name
         filename = pathlib.Path(f"{FirmwareDownloader._generate_random_filename()}-{name}")
         try:
+            # TODO: Migrate pipeline to async and use aiohttp
             logger.debug(f"Downloading: {url}")
             urlretrieve(url, filename)
         except Exception as error:
@@ -90,6 +91,7 @@ class FirmwareDownloader:
         Returns:
             bool: True if file was downloaded and validated, False if not.
         """
+        # TODO: Migrate pipeline to async and use aiohttp
         with urlopen(FirmwareDownloader._manifest_remote) as http_response:
             manifest_gzip = http_response.read()
             manifest = gzip.decompress(manifest_gzip)
@@ -181,7 +183,7 @@ class FirmwareDownloader:
 
         # Autodetect the latest supported version.
         # For .apj firmwares (e.g. Pixhawk), we use the latest STABLE version while for the others (e.g. SITL and
-        # Navigator) we use latest BETA. Specially on this development phase of the blueos-docker/navigator, using
+        # Navigator) we use latest BETA. Specially on this development phase of the BlueOS/navigator, using
         # the BETA release allow us to track and fix introduced bugs faster.
         if not version:
             if firmware_format == FirmwareFormat.APJ:

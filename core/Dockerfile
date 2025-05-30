@@ -1,5 +1,5 @@
 # Build frontend
-FROM --platform=$BUILDPLATFORM oven/bun:1.0.3-slim AS frontendBuilder
+FROM --platform=$BUILDPLATFORM oven/bun:1.0.3-slim AS frontend-builder
 
 ARG VITE_APP_GIT_DESCRIBE
 ENV VITE_APP_GIT_DESCRIBE=${VITE_APP_GIT_DESCRIBE:-none/none-0-g00000000}
@@ -19,18 +19,46 @@ RUN <<-EOF
 set -e
 
     bun install --cwd /home/pi/frontend
-    bun run --cwd /home/pi/frontend build
+    NODE_OPTIONS=--max-old-space-size=8192 bun run --cwd /home/pi/frontend build
 
 EOF
 
-FROM bluerobotics/blueos-base:0.2.0 as base
+FROM bluerobotics/blueos-base:0.2.1 AS base
 
 # Download binaries
-FROM base as downloadBinaries
+FROM base AS download-binaries
 COPY tools /home/pi/tools
 RUN /home/pi/tools/install-static-binaries.sh
 
-# BlueOS-docker base image
+# Generation of python virtual environment for our libraries and services
+FROM base AS install-services-and-libs
+
+RUN apt update && apt install -y --no-install-recommends g++
+
+# UV installation
+ADD https://astral.sh/uv/install.sh /uv-installer.sh
+RUN sh /uv-installer.sh && rm /uv-installer.sh
+ENV PATH="/root/.local/bin/:$PATH"
+
+# Project files
+COPY ./uv.lock /home/pi/uv.lock
+COPY ./pyproject.toml /home/pi/pyproject.toml
+COPY ./.python-version /home/pi/.python-version
+
+COPY ./libs /home/pi/libs
+COPY ./services /home/pi/services
+
+COPY ./tools /home/pi/tools
+
+# Virtual environment creation and packages installation
+WORKDIR /home/pi
+RUN uv venv && uv sync --frozen
+
+# Post install scripts
+ENV VIRTUAL_ENV=/home/pi/.venv
+RUN /home/pi/tools/install-python-libs.sh
+
+# BlueOS base image
 FROM base
 
 # Define arguments for target platform
@@ -66,33 +94,32 @@ ENV TARGETVARIANT=${TARGETVARIANT}
 COPY tools /home/pi/tools
 RUN /home/pi/tools/install-system-tools.sh
 
-# Install custom libraries
+# Copy libs and services code
 COPY libs /home/pi/libs
-RUN /home/pi/libs/install-libs.sh
+COPY services /home/pi/services
 
 # Set tmux configuration file
 COPY configuration/tmux.conf /etc/tmux.conf
 COPY configuration/motd /etc/motd
 
-# Install services
-COPY services /home/pi/services
-RUN /home/pi/services/install-services.sh
+# Copy configuration files
 COPY start-blueos-core /usr/bin/start-blueos-core
 COPY run-service.sh /usr/bin/run-service
 
-# Copy binaries and necessary folders from downloadBinaries to this stage
-COPY --from=downloadBinaries \
+# Copy binaries and necessary folders from download-binaries to this stage
+COPY --from=download-binaries \
     /usr/bin/blueos_startup_update.py \
     /usr/bin/bridges \
     /usr/bin/machineid-cli \
     /usr/bin/mavlink2rest \
-    /usr/bin/mavlink-routerd \
-    /usr/bin/mavp2p \
+    /usr/bin/mavlink-server \
+    /usr/bin/zenoh \
     /usr/bin/ttyd \
     /usr/bin/
 
-# Copy frontend built on frontendBuild to this stage
-COPY --from=frontendBuilder /home/pi/frontend/dist /home/pi/frontend
+# Copy frontend built on frontend-builder to this stage
+COPY --from=frontend-builder /home/pi/frontend/dist /home/pi/frontend
+COPY --from=install-services-and-libs /home/pi/.venv /usr/blueos/venv
 
 RUN <<-EOF
 set -e
@@ -107,7 +134,8 @@ set -e
     RCFILE_PATH="/etc/blueosrc"
     echo "export GIT_DESCRIBE_TAGS=$GIT_DESCRIBE_TAGS" >> $RCFILE_PATH
     echo "export HISTFILE=/etc/blueos/.bash_history" >> $RCFILE_PATH
-    echo "export PATH=$(python -m site --user-base)/bin:/usr/blueos/bin:$PATH" >> $RCFILE_PATH
+    echo "export PATH=/usr/blueos/venv/bin:/usr/blueos/bin:$PATH" >> $RCFILE_PATH
+    echo "export RUST_BACKTRACE=1" >> $RCFILE_PATH
 
     # Setup shortcuts
     mkdir -p /shortcuts
@@ -121,7 +149,14 @@ set -e
     # Setup user
     useradd -m -u 1000 -G dialout blueos
 
+    # Remove /etc/dhcpcd.conf if it exists inside the docker
+    # This is to prevent an awkward behavior where docker doesnt find the file
+    # on the host system and creates a folder instead, but tries to mount the folder
+    # on top of the existing file inside the docker.
+    # This allows docker to actually create a folder, which we handle in networksetup.py
+    rm -f /etc/dhcpcd.conf
+
 EOF
 
 # Start
-CMD /bin/bash -i /usr/bin/start-blueos-core && sleep infinity
+CMD ["/bin/bash", "-i", "-c", "/usr/bin/start-blueos-core && sleep infinity"]

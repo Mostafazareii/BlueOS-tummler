@@ -1,5 +1,6 @@
 <template>
   <v-container fluid>
+    <not-safe-overlay />
     <pull-progress
       :progress="pull_output"
       :show="show_pull_output"
@@ -38,11 +39,14 @@
             label="Follow Logs"
             hide-details
           />
+          <v-btn class="ml-3" icon @click="downloadCurrentLog">
+            <v-icon>mdi-download</v-icon>
+          </v-btn>
         </v-app-bar>
         <v-sheet>
           <v-card-text ref="logContainer" class="scrollable-content">
             <!-- eslint-disable -->
-            <pre class="logs" v-html="log_output" />
+            <pre class="logs" v-html="html_log_output" />
             <!-- eslint-enable -->
           </v-card-text>
         </v-sheet>
@@ -102,6 +106,7 @@
       :installed-extensions="installed_extensions"
       @clicked="showModal"
       @update="update"
+      @refresh="fetchManifest"
     />
     <BazaarTab
       v-show="is_bazaar_tab"
@@ -177,8 +182,10 @@
 <script lang="ts">
 import AnsiUp from 'ansi_up'
 import axios, { CancelTokenSource } from 'axios'
+import { saveAs } from 'file-saver'
 import Vue from 'vue'
 
+import NotSafeOverlay from '@/components/common/NotSafeOverlay.vue'
 import SpinningLogo from '@/components/common/SpinningLogo.vue'
 import BackAlleyTab from '@/components/kraken/BackAlleyTab.vue'
 import BazaarTab from '@/components/kraken/BazaarTab.vue'
@@ -202,8 +209,8 @@ import {
 } from '../types/kraken'
 
 const API_URL = '/kraken/v1.0'
-
 const notifier = new Notifier(kraken_service)
+const ansi = new AnsiUp()
 
 export default Vue.extend({
   name: 'ExtensionManagerView',
@@ -216,6 +223,7 @@ export default Vue.extend({
     PullProgress,
     ExtensionCreationModal,
     SpinningLogo,
+    NotSafeOverlay,
   },
   data() {
     return {
@@ -241,6 +249,7 @@ export default Vue.extend({
       log_abort_controller: null as null | CancelTokenSource,
       log_output: null as null | string,
       log_info_output: null as null | string,
+      log_container_name: null as null | string,
       metrics: {} as Dictionary<{ cpu: number, memory: number}>,
       metrics_interval: 0,
       edited_extension: null as null | InstalledExtensionData & { editing: boolean },
@@ -265,6 +274,9 @@ export default Vue.extend({
       }
 
       return this.manifest as ExtensionData[]
+    },
+    html_log_output(): string {
+      return ansi.ansi_to_html(this.log_output ?? '')
     },
   },
   watch: {
@@ -454,16 +466,15 @@ export default Vue.extend({
       this.show_log = true
       let outputBuffer = ''
 
-      const containerName = `extension-${(extension.docker + extension.tag).replace(/[^a-zA-Z0-9]/g, '')}`
+      this.log_container_name = `extension-${(extension.docker + extension.tag).replace(/[^a-zA-Z0-9]/g, '')}`
       const fetchLogs = (): void => {
-        const ansi = new AnsiUp()
         let lastDecode = ''
 
         back_axios({
           method: 'get',
           url: `${API_URL}/log`,
           params: {
-            container_name: containerName,
+            container_name: this.log_container_name,
           },
           onDownloadProgress: (progressEvent) => {
             const result = aggregateStreamingResponse(
@@ -472,7 +483,7 @@ export default Vue.extend({
             )
 
             if (result) {
-              lastDecode = ansi.ansi_to_html(result)
+              lastDecode = result
               this.log_info_output = `Logs for ${extension.name}`
               this.$set(this, 'log_output', outputBuffer + lastDecode)
             }
@@ -500,6 +511,10 @@ export default Vue.extend({
       }
 
       fetchLogs()
+    },
+    async downloadCurrentLog() {
+      const file = new File([this.log_output ?? ''], `${this.log_container_name}.log`, { type: 'text/plain' })
+      saveAs(file)
     },
     showModal(extension: ExtensionData) {
       this.show_dialog = true

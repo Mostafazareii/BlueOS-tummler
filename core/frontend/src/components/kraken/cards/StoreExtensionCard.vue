@@ -9,6 +9,23 @@
     class="store-extension-card"
   >
     <div
+      v-if="is_beta_only_extension"
+      class="beta-holder-container"
+    >
+      <v-chip
+        color="red"
+        small
+        label
+        text-color="white"
+        class="beta-chip"
+      >
+        <div style="width: 20px;" />
+        Beta
+        <div style="width: 20px;" />
+      </v-chip>
+    </div>
+
+    <div
       :style="img_background_style"
       class="img-background"
     />
@@ -41,11 +58,11 @@
 
           <v-card-subtitle class="px-3 py-2 ext-subtitles">
             <div
-              class="extension-name"
+              class="line-constrained extension-name"
             >
               {{ extension.name.toUpperCase() }}
             </div>
-            <div class="extension-description">
+            <div class="line-constrained extension-description">
               {{ extension.description }}
             </div>
           </v-card-subtitle>
@@ -66,7 +83,7 @@
         />
       </v-avatar>
       <div class="extension-creators">
-        <div class="extension-company">
+        <div class="line-constrained extension-company">
           {{ extension_company }}
         </div>
         <div class="extension-authors">
@@ -211,6 +228,9 @@ export default Vue.extend({
       }
 
       return {}
+    },
+    is_beta_only_extension(): boolean {
+      return Object.values(this.extension.versions).every((version) => !isStable(version.tag))
     },
   },
   methods: {
@@ -399,26 +419,27 @@ export default Vue.extend({
   z-index: 4 !important;
 }
 
+.line-constrained {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+}
+
 .extension-name {
   font-weight: bold;
   font-size: 18px;
   max-height: 1.4em;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  display: -webkit-box;
+  line-clamp: 1;
   -webkit-line-clamp: 1;
-  -webkit-box-orient: vertical;
 }
 
 .extension-description {
   color: gray;
   font-size: 14px;
   max-height: 3.6em;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  display: -webkit-box;
+  line-clamp: 2;
   -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
 }
 
 .extension-creators {
@@ -430,6 +451,8 @@ export default Vue.extend({
 .extension-company {
   font-weight: bold;
   font-size: 14px;
+  line-clamp: 1;
+  -webkit-line-clamp: 1;
 }
 
 .extension-authors {
@@ -478,4 +501,17 @@ export default Vue.extend({
   );
   pointer-events: none;
 }
+
+.beta-holder-container {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  transform: translate(50%, -50%) rotateZ(45deg);
+  z-index: 5 !important;
+}
+
+.beta-chip {
+  transform-origin: center;
+}
+
 </style>

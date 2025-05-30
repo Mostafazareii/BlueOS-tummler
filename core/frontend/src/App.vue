@@ -17,6 +17,7 @@
           :label="name"
           :value="name"
           class="pa-0 pl-3 ma-0"
+          @change="settings.user_top_widgets = selected_widgets"
         />
       </v-list>
     </v-card>
@@ -36,11 +37,25 @@
           color="white"
           @click="drawer = true"
         />
+        <v-card
+          v-if="!safe_mode"
+          v-tooltip="'Some functionality is not available while the vehicle is armed'"
+          class="d-flex align-center warning justify-center mr-5"
+          height="40"
+        >
+          <v-icon class="ml-3">
+            mdi-alert-outline
+          </v-icon>
+          <v-card-title>
+            Armed
+          </v-card-title>
+        </v-card>
         <draggable v-model="selected_widgets" class="d-flex align-center justify-center">
           <component
-            :is="getWidget(widget_name)"
+            :is="getWidget(widget_name).component"
             v-for="(widget_name, i) in selected_widgets"
             :key="i"
+            v-bind="getWidget(widget_name).props"
             class="mr-2"
             ripple
             disabled
@@ -53,7 +68,8 @@
         <v-spacer />
         <beacon-tray-menu />
         <health-tray-menu />
-        <gps-tray-menu />
+        <gps-tray-menu :instance="1" />
+        <gps-tray-menu :instance="2" />
         <theme-tray-menu />
         <system-checker-tray-menu />
         <vehicle-reboot-required-tray-menu />
@@ -189,9 +205,10 @@
 
             <v-list-item
               v-else
-              :to="menu.new_page ? null : menu.route"
+              :to="menu.new_page || menu.disabled ? null : menu.route"
               :target="menu.new_page ? '_blank' : '_self'"
-              :href="menu.extension ? menu.route : undefined"
+              :href="menu.extension && !menu.disabled ? menu.route : undefined"
+              :disabled="menu.disabled"
             >
               <template #default>
                 <v-list-item-icon style="min-width:28px;">
@@ -235,7 +252,26 @@
                     </div>
                   </v-theme-provider>
                   <v-theme-provider
-                    v-if="menu.extension"
+                    v-if="menu.disabled"
+                    dark
+                  >
+                    <div
+                      class="extension-marker ma-0"
+                    >
+                      <v-avatar
+                        class="ma-0"
+                        color="error"
+                        size="15"
+                      >
+                        <v-icon
+                          size="12"
+                          v-text="'mdi-cloud-off'"
+                        />
+                      </v-avatar>
+                    </div>
+                  </v-theme-provider>
+                  <v-theme-provider
+                    v-else-if="menu.extension"
                     dark
                   >
                     <div
@@ -307,7 +343,7 @@
             v-if="settings.is_dev_mode"
             v-tooltip="'Disable dev mode'"
             icon
-            @click.stop="settings.is_dev_mode = false"
+            @click.stop="bluePillClick"
           >
             <v-icon color="primary">
               mdi-pill
@@ -335,7 +371,6 @@
       <div id="tour-center-hook" />
     </v-main>
     <ethernet-updater />
-    <wifi-updater />
     <mavlink-updater />
     <new-version-notificator />
     <Wizard />
@@ -385,10 +420,13 @@ import HealthTrayMenu from './components/health/HealthTrayMenu.vue'
 import MavlinkUpdater from './components/mavlink/MavlinkUpdater.vue'
 import NotificationTrayButton from './components/notifications/TrayButton.vue'
 import WifiTrayMenu from './components/wifi/WifiTrayMenu.vue'
-import WifiUpdater from './components/wifi/WifiUpdater.vue'
 import menus, { menuItem } from './menus'
+import autopilot_data from './store/autopilot'
+import system_information from './store/system-information'
+import { TopBarWidget } from './types/common'
 import Cpu from './widgets/Cpu.vue'
 import Disk from './widgets/Disk.vue'
+import Networking from './widgets/Networking.vue'
 
 export default Vue.extend({
   name: 'App',
@@ -400,7 +438,6 @@ export default Vue.extend({
     'pirate-mode-tray-menu': PiradeModeTrayMenu,
     'theme-tray-menu': ThemeTrayMenu,
     'wifi-tray-menu': WifiTrayMenu,
-    'wifi-updater': WifiUpdater,
     'ethernet-tray-menu': EthernetTrayMenu,
     'cloud-tray-menu': CloudTrayMenu,
     'ethernet-updater': EthernetUpdater,
@@ -428,21 +465,50 @@ export default Vue.extend({
     tourCallbacks: {}, // we are setting this up in mounted otherwise "this" can be undefined
     context_menu_position: [0, 0],
     context_menu_visible: false,
-    widgets: [
-      {
-        component: Cpu,
-        name: 'CPU',
-      },
-      {
-        component: Disk,
-        name: 'Disk',
-      },
-    ],
+
     selected_widgets: settings.user_top_widgets,
     bootstrap_version: undefined as string|undefined,
     build_clicks: 0,
   }),
   computed: {
+    widgets(): TopBarWidget[] {
+      const widgets = [
+        {
+          component: Cpu,
+          name: 'CPU',
+          props: {},
+        },
+        {
+          component: Disk,
+          name: 'Disk',
+          props: {},
+        },
+      ]
+      // lets filter out docker, veth, and zerotier interfaces
+      if (!system_information.system?.network) {
+        return widgets
+      }
+      const extra_interfaces = system_information.system?.network?.filter(
+        (iface) => !['docker', 'lo', 'veth'].some((prefix) => iface.name.startsWith(prefix)),
+      )
+      for (const iface of extra_interfaces) {
+        widgets.push({
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          component: Networking as any,
+          props: {
+            interface: iface.name,
+          },
+          name: `${iface.name} Networking`,
+        })
+      }
+      return widgets
+    },
+    settings_selected_widgets(): string[] {
+      return settings.user_top_widgets
+    },
+    isBehindWebProxy(): boolean {
+      return window.location.host.endsWith('.cloud')
+    },
     topWidgetsName(): string[] {
       return this.widgets.map((item) => item.name)
     },
@@ -457,6 +523,9 @@ export default Vue.extend({
     },
     app_bar_style(): string {
       return settings.is_dark_theme ? 'dark-background-glass' : 'light-background-glass'
+    },
+    safe_mode(): boolean {
+      return autopilot_data.is_safe
     },
     wifi_connected(): boolean {
       return wifi.current_network != null
@@ -485,6 +554,7 @@ export default Vue.extend({
             advanced: false,
             text: service.metadata?.description ?? 'Service text',
             extension: true,
+            disabled: this.isBehindWebProxy && !service.metadata?.works_in_relative_paths,
           }
         })
 
@@ -650,8 +720,8 @@ export default Vue.extend({
 
       document.title = `${this.$route.name} - ${project_name}`
     },
-    selected_widgets() {
-      settings.user_top_widgets = this.selected_widgets
+    settings_selected_widgets() {
+      this.selected_widgets = this.settings_selected_widgets
     },
   },
 
@@ -680,7 +750,7 @@ export default Vue.extend({
       return url + separator + extra_queries
     },
     getWidget(name: string) {
-      return this.widgets.filter((widget) => widget.name === name)?.[0]?.component
+      return this.widgets.find((widget) => widget.name === name) || { component: null, props: {} }
     },
     navBarHandler(event: Event) {
       const { clientX: mouseX, clientY: mouseY } = event as MouseEvent
@@ -696,6 +766,9 @@ export default Vue.extend({
       if (service.metadata?.avoid_iframes) {
         const base_url = window.location.origin.split(':').slice(0, 2).join(':')
         return `${base_url}:${service.port}`
+      }
+      if (service.metadata?.works_in_relative_paths) {
+        return `/extensionv2/${service.metadata.sanitized_name}/`
       }
       let address = `/extension/${service?.metadata?.sanitized_name}`
       if (service?.metadata?.new_page) {
@@ -735,10 +808,14 @@ export default Vue.extend({
       }
     },
     buildDateClick(): void {
-      this.build_clicks = (this.build_clicks + 1) % 10
+      this.build_clicks = (this.build_clicks + 1) % 5
       if (this.build_clicks === 0) {
         settings.is_dev_mode = true
       }
+    },
+    bluePillClick(): void {
+      this.build_clicks = 0
+      settings.is_dev_mode = false
     },
   },
 })
@@ -786,6 +863,10 @@ span.build_info {
   font-size: 70%;
   margin-left: 30px;
   display: block;
+}
+
+#current-version {
+  user-select: none;
 }
 
 #tour-center-hook {

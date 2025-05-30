@@ -4,12 +4,13 @@ import json
 import logging
 import os
 import re
-from enum import Enum
 import time
 from typing import List, Tuple
+import configparser
 
 import appdirs
 from commonwealth.utils.commands import run_command, save_file, locate_file, load_file
+from commonwealth.utils.general import HostOs, CpuType, get_cpu_type, get_host_os
 from commonwealth.utils.logs import InterceptHandler, init_logger
 from loguru import logger
 
@@ -30,12 +31,15 @@ DELTA_JSON = {
             "/etc/machine-id": {"bind": "/etc/machine-id", "mode": "ro"},
             "/etc/resolv.conf.host": {"bind": "/etc/resolv.conf.host", "mode": "ro"},
             "/home/pi/.ssh": {"bind": "/home/pi/.ssh", "mode": "rw"},
+            "/home/pi/.docker": {"bind": "/home/pi/.docker", "mode": "rw"},
+            "/root/.docker": {"bind": "/root/.docker", "mode": "rw"},
             "/run/udev": {"bind": "/run/udev", "mode": "ro"},
             "/sys/": {"bind": "/sys/", "mode": "rw"},
             "/usr/blueos/bin": {"bind": "/usr/blueos/bin", "mode": "rw"},
             "/usr/blueos/extensions": {"bind": "/usr/blueos/extensions", "mode": "rw"},
             "/usr/blueos/userdata": {"bind": "/usr/blueos/userdata", "mode": "rw"},
             "/var/run/wpa_supplicant": {"bind": "/var/run/wpa_supplicant", "mode": "rw"},
+            "/var/run/dbus": {"bind": "/var/run/dbus", "mode": "rw"},
         }
     }
 }
@@ -47,37 +51,7 @@ CONFIG_USER_PROTECTION_WORD = "custom"
 config_file = None
 cmdline_file = None
 
-
-class CpuType(str, Enum):
-    PI4 = "Raspberry Pi 4 (BCM2711)"
-    PI5 = "Raspberry Pi 5 (BCM2712)"
-    Other = "Other"
-
-
-class HostOs(str, Enum):
-    Bookworm = "Debian(Raspberry Pi OS?) 12 (Bookworm)"
-    Bullseye = "Debian(Raspberry Pi OS?) 11 (Bullseye)"
-    Other = "Other"
-
-
-def get_cpu_type() -> CpuType:
-    with open("/proc/cpuinfo", "r", encoding="utf-8") as f:
-        for line in f:
-            if "Raspberry Pi 4" in line:
-                return CpuType.PI4
-            if "Raspberry Pi 5" in line:
-                return CpuType.PI5
-    return CpuType.Other
-
-
-def get_host_os() -> HostOs:
-    os_release = load_file("/etc/os-release")
-    if "bookworm" in os_release:
-        return HostOs.Bookworm
-    if "bullseye" in os_release:
-        return HostOs.Bullseye
-    return HostOs.Other
-
+disabled_patches = [entry.strip() for entry in os.getenv("BLUEOS_DISABLE_PATCHES", "").split(",")]
 
 # Copyright 2016-2022 Paul Durivage
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -115,51 +89,70 @@ def update_startup() -> bool:
         return True
 
 
-def boot_config_get_or_append_session(config_content: List[str], session_name: str) -> Tuple[int, int]:
+def boot_config_get_or_append_section(config_content: List[str], section_name: str) -> Tuple[int, int]:
     regex_flags = re.IGNORECASE | re.DOTALL | re.MULTILINE
 
-    session_match_pattern = r"^\[" + session_name + r"\].*$"
-    session_start_line_number = next(
-        (i for (i, line) in enumerate(config_content) if re.match(session_match_pattern, line, regex_flags)), None
+    section_match_pattern = r"^\[" + section_name + r"\].*$"
+    section_start_line_number = next(
+        (i for (i, line) in enumerate(config_content) if re.match(section_match_pattern, line, regex_flags)), None
     )
-    if session_start_line_number is None:
-        config_content.append(f"\n[{session_name}]")
-        session_start_line_number = len(config_content)
+    if section_start_line_number is None:
+        config_content.append(f"\n[{section_name}]")
+        section_start_line_number = len(config_content)
 
-    any_session_match_pattern = r"^\[.*\].*$"
-    session_end_line_number = next(
+    any_section_match_pattern = r"^\[.*\].*$"
+    section_end_line_number = next(
         (
-            (i + session_start_line_number + 1)
-            for (i, line) in enumerate(config_content[session_start_line_number + 1 :])
-            if line == "" or re.match(any_session_match_pattern, line, regex_flags)
+            (i + section_start_line_number + 1)
+            for (i, line) in enumerate(config_content[section_start_line_number + 1 :])
+            if line == "" or re.match(any_section_match_pattern, line, regex_flags)
         ),
         None,
     )
-    if session_end_line_number is None:
-        session_end_line_number = len(config_content)
+    if section_end_line_number is None:
+        section_end_line_number = len(config_content)
 
-    return (session_start_line_number, session_end_line_number)
+    return (section_start_line_number, section_end_line_number)
 
 
-def boot_config_add_configuration_at_session(config_content: List[str], config: str, session_name: str) -> None:
+def boot_config_add_configuration_at_section(config_content: List[str], config: str, section_name: str) -> None:
     regex_flags = re.IGNORECASE | re.DOTALL | re.MULTILINE
 
-    (session_start, session_end) = boot_config_get_or_append_session(config_content, session_name)
+    (section_start, section_end) = boot_config_get_or_append_section(config_content, section_name)
 
-    session_content = config_content[session_start:session_end]
+    section_content = config_content[section_start:section_end]
     config_already_exists = any(
-        session_content for session_content in session_content if re.match(config, session_content, regex_flags)
+        section_content for section_content in section_content if re.match(config, section_content, regex_flags)
     )
     if not config_already_exists:
-        config_content.insert(session_start + 1, config)
+        config_content.insert(section_start + 1, config)
 
 
-def boot_config_filter_conflicting_configuration_at_session(
-    config_content: List[str], config_pattern_match: str, config: str, session_name: str
+def boot_config_remove_section(config_content: List[str], section_name: str) -> None:
+    (section_start, section_end) = boot_config_get_or_append_section(config_content, section_name)
+    del config_content[section_start:section_end]
+
+
+def boot_config_get_available_section(config_content: List[str]) -> List[str]:
+    regex_flags = re.IGNORECASE | re.DOTALL | re.MULTILINE
+
+    section_match_pattern = r"^\[(?P<section>\w+)\].*$"
+
+    section = []
+    for line in config_content:
+        match = re.match(section_match_pattern, line, regex_flags)
+        if match:
+            section.append(match.group("section"))
+
+    return section
+
+
+def boot_config_filter_conflicting_configuration_at_section(
+    config_content: List[str], config_pattern_match: str, config: str, section_name: str
 ) -> List[str]:
     regex_flags = re.IGNORECASE | re.DOTALL | re.MULTILINE
 
-    (session_start, session_end) = boot_config_get_or_append_session(config_content, session_name)
+    (section_start, section_end) = boot_config_get_or_append_section(config_content, section_name)
 
     return [
         line
@@ -174,8 +167,8 @@ def boot_config_filter_conflicting_configuration_at_session(
                 and not (
                     # ...if it's the correct one....
                     re.match(f"^{config}.*$", line, regex_flags)
-                    # ...and lives inside the correct session.
-                    and (session_start < i < session_end)
+                    # ...and lives inside the correct section.
+                    and (section_start < i < section_end)
                 )
             )
         )
@@ -192,7 +185,7 @@ def create_hard_link(source_file_name: str, destination_file_name: str) -> bool:
     return run_command(command, False).returncode == 0
 
 
-def boot_cmdfile_add_modules(cmdline_content: List[str], config_key: str, desired_config: List[str]):
+def boot_cmdline_add_modules(cmdline_content: List[str], config_key: str, desired_config: List[str]):
     regex_flags = re.IGNORECASE | re.DOTALL | re.MULTILINE
 
     # Get each configs line indexes, if any
@@ -218,7 +211,7 @@ def boot_cmdfile_add_modules(cmdline_content: List[str], config_key: str, desire
         cmdline_content.append(config_line)
 
 
-def boot_cmdfile_add_config(cmdline_content: List[str], config_key: str, config_value: str):
+def boot_cmdline_add_config(cmdline_content: List[str], config_key: str, config_value: str):
     regex_flags = re.IGNORECASE | re.DOTALL | re.MULTILINE
 
     # Get each configs line indexes, if any
@@ -261,7 +254,7 @@ def update_cgroups() -> bool:
         ("cgroup_enable", "memory"),
     ]
     for (config_key, config_value) in cgroups:
-        boot_cmdfile_add_config(cmdline_content, config_key, config_value)
+        boot_cmdline_add_config(cmdline_content, config_key, config_value)
 
     # Don't need to apply or restart if the content is the same
     if unpatched_cmdline_content == cmdline_content:
@@ -271,6 +264,68 @@ def update_cgroups() -> bool:
     cmdline_content_str = " ".join(cmdline_content)
     backup_identifier = "before_update_cgroups"
     save_file(cmdline_file, cmdline_content_str, backup_identifier)
+
+    # Patch applied and system needs to be restarted for it to take effect
+    return True
+
+
+def update_i2c4_symlink() -> bool:
+    logger.info("Running i2c4 symlink update..")
+    i2c4_symlink = "/dev/i2c-4"
+    i2c4_device = "/dev/i2c-3"
+    if os.path.exists(i2c4_symlink):
+        return False
+    if not os.path.exists(i2c4_device):
+        return False
+    command = f"sudo ln -s {i2c4_device} {i2c4_symlink}"
+    run_command(command, False)
+    return False  # This patch doesn't require restart to take effect
+
+
+def revert_update_dwc2() -> bool:
+    """
+    Removes dwc2 configuration from cmdline.txt
+    This was being wrongly applied on Pi3 due to a bad host_cpu check.
+    """
+
+    # Remove dwc2 module configuration from cmdline
+    unpatched_cmdline_content = load_file(cmdline_file).replace("\n", "").split(" ")
+    cmdline_content = []
+    for item in unpatched_cmdline_content:
+        if "dwc2" not in item and "g_ether" not in item:
+            cmdline_content.append(item)
+
+    # Save if needed, with backup
+    if unpatched_cmdline_content == cmdline_content:
+        return False
+    save_file(cmdline_file, " ".join(cmdline_content), "before_revert_update_dwc2")
+
+    # Patch applied and system needs to be restarted for it to take effect
+    return True
+
+
+def clean_config_pi3() -> bool:
+    """
+    Removes any tagged configurations from config.txt on Pi3
+    This was being wrongly applied due to a bad host_cpu check.
+    """
+    config_content = load_file(config_file).splitlines()
+    unpatched_config_content = config_content.copy()
+
+    # Remove unwanted sections
+    # For a Pi3, we want to keep certain sections (see https://www.raspberrypi.com/documentation/computers/config_txt.html#model-filters)
+    sections_to_keep = ["all", "pi3", "pi3+", "cm3", "cm3+"]
+    current_section = boot_config_get_available_section(config_content)
+    for section in current_section:
+        if section not in sections_to_keep:
+            boot_config_remove_section(config_content, section)
+
+    # Save if needed, with backup
+    backup_identifier = "before_clean_config_pi3"
+    if unpatched_config_content == config_content:
+        return False
+    config_content_str = "\n".join(config_content)
+    save_file(config_file, config_content_str, backup_identifier)
 
     # Patch applied and system needs to be restarted for it to take effect
     return True
@@ -291,13 +346,13 @@ def update_dwc2() -> bool:
 
     # Add dwc2 overlay in pi4 section if it doesn't exist
     dwc2_overlay_config = "dtoverlay=dwc2,dr_mode=otg"
-    pi4_session_name = "pi4"
-    boot_config_add_configuration_at_session(config_content, dwc2_overlay_config, pi4_session_name)
+    section_name = "pi4" if get_cpu_type() == CpuType.PI4 else "pi5"
+    boot_config_add_configuration_at_section(config_content, dwc2_overlay_config, section_name)
 
     # Remove any unprotected and conflicting dwc2 overlay configuration
     dwc2_overlay_match_pattern = "^[#]*dtoverlay=dwc2.*$"
-    config_content = boot_config_filter_conflicting_configuration_at_session(
-        config_content, dwc2_overlay_match_pattern, dwc2_overlay_config, pi4_session_name
+    config_content = boot_config_filter_conflicting_configuration_at_section(
+        config_content, dwc2_overlay_match_pattern, dwc2_overlay_config, section_name
     )
 
     # Save if needed, with backup
@@ -310,7 +365,7 @@ def update_dwc2() -> bool:
     unpatched_cmdline_content = cmdline_content.copy()
 
     # Add the dwc2 module configuration to enable USB OTG as ethernet adapter
-    boot_cmdfile_add_modules(cmdline_content, "modules-load", ["dwc2", "g_ether"])
+    boot_cmdline_add_modules(cmdline_content, "modules-load", ["dwc2", "g_ether"])
 
     # Don't need to apply if the content is the same, restart if the above part requires
     if unpatched_cmdline_content == cmdline_content:
@@ -352,14 +407,14 @@ def update_navigator_overlays() -> bool:
     ]
     navigator_configs_with_match_patterns.reverse()
 
-    pi4_session_name = "pi4"
+    pi4_section_name = "pi4"
     for (config, config_match_pattern) in navigator_configs_with_match_patterns:
-        # Add each navigator configuration to pi4 session
-        boot_config_add_configuration_at_session(config_content, config, pi4_session_name)
+        # Add each navigator configuration to pi4 section
+        boot_config_add_configuration_at_section(config_content, config, pi4_section_name)
 
         # Remove any unprotected and conflicting configuration of peripherals
-        config_content = boot_config_filter_conflicting_configuration_at_session(
-            config_content, config_match_pattern, config, pi4_session_name
+        config_content = boot_config_filter_conflicting_configuration_at_section(
+            config_content, config_match_pattern, config, pi4_section_name
         )
 
     # Don't need to apply or restart if the content is the same
@@ -420,6 +475,45 @@ def ensure_user_data_structure_is_in_place() -> bool:
     return False
 
 
+def ensure_ipv6_disabled() -> bool:
+    required_entries = [
+        (
+            "net.ipv6.conf.all.disable_ipv6=1",
+            re.compile(r"^\s*#?\s*net\.ipv6\.conf\.all\.disable_ipv6\s*=\s*1", re.MULTILINE),
+        ),
+        (
+            "net.ipv6.conf.default.disable_ipv6=1",
+            re.compile(r"^\s*#?\s*net\.ipv6\.conf\.default\.disable_ipv6\s*=\s*1", re.MULTILINE),
+        ),
+        (
+            "net.ipv6.conf.lo.disable_ipv6=1",
+            re.compile(r"^\s*#?\s*net\.ipv6\.conf\.lo\.disable_ipv6\s*=\s*1", re.MULTILINE),
+        ),
+    ]
+
+    sysctl_config_path = "/etc/sysctl.conf"
+    sysctl_config_file = load_file(sysctl_config_path)
+
+    # Make sure every required entry is in the file and uncommented
+    needs_update = False
+    for (desired, pattern) in required_entries:
+        entry_match = pattern.search(sysctl_config_file)
+        if entry_match:
+            line_result = entry_match.group(0)
+            if "#" in line_result:
+                sysctl_config_file = pattern.sub(desired, sysctl_config_file)
+                needs_update = True
+        else:
+            sysctl_config_file += f"\n{desired}\n"
+            needs_update = True
+
+    if needs_update:
+        backup_identifier = "before_no_ipv6"
+        save_file(sysctl_config_path, sysctl_config_file, backup_identifier)
+
+    return needs_update
+
+
 def run_command_is_working():
     output = run_command("uname -a", check=False)
     if output.returncode != 0:
@@ -433,6 +527,141 @@ def fix_ssh_ownership() -> bool:
     command = "sudo chown -R $USER:$USER $HOME/.ssh"
     run_command(command, False)
     return False
+
+
+def fix_wpa_service() -> bool:
+    """
+    Adds -i wlan0 and -c /etc/wpa_supplicant/wpa_supplicant.conf to the wpa_supplicant service
+    This is needed to make the service actually consume the .conf file with update_config=1
+    """
+    logger.info("checking wpa_supplicant service...")
+    file_path = "/lib/systemd/system/wpa_supplicant.service"
+    original_file = load_file(file_path)
+    # extract execstart line
+    execstart_line = next((line for line in original_file.splitlines() if line.startswith("ExecStart=")), None)
+    if execstart_line and "-i " in execstart_line and "-c " in execstart_line:
+        # the settings are there. not our job to check if they are the ones we want
+        return False
+    new_execstart_line = execstart_line
+    if "-i " not in execstart_line:
+        new_execstart_line = new_execstart_line + " -i wlan0"
+    if "-c " not in execstart_line:
+        new_execstart_line = new_execstart_line + " -c /etc/wpa_supplicant/wpa_supplicant.conf"
+    original_file = original_file.replace(execstart_line, new_execstart_line)
+    save_file(file_path, original_file, "before_fix_wpa_service")
+    return True
+
+
+def configure_network_manager() -> bool:
+    """
+    Ensures NetworkManager.conf has [main] section with dns=none set if dns is not already configured
+    """
+    logger.info("Configuring NetworkManager DNS settings...")
+    file_path = "/etc/NetworkManager/NetworkManager.conf"
+
+    config = configparser.ConfigParser()
+
+    # Try to read existing file
+    result = run_command(f"test -f {file_path} && cat {file_path}", check=False)
+    if result.returncode != 0:
+        # File doesn't exist, create with template
+        content = """[main]
+plugins=ifupdown,keyfile
+dns=none
+
+[ifupdown]
+managed=false
+
+[device]
+wifi.scan-rand-mac-address=no
+
+[keyfile]
+unmanaged-devices=interface:eth0;interface:usb0
+"""
+        run_command(f"echo '{content}' | sudo tee {file_path}", check=False)
+        return True
+
+    config.read_string(result.stdout)
+
+    # Check if we need to make changes
+    if ("main" in config.sections() and "dns" in config["main"]) and (
+        "keyfile" in config.sections() and "unmanaged-devices" in config["keyfile"]
+    ):
+        return False
+
+    # Add our settings if needed
+    if "main" not in config:
+        config.add_section("main")
+    if "dns" not in config["main"]:
+        config["main"]["dns"] = "none"
+
+    # Ensure keyfile section exists and has unmanaged-devices
+    if "keyfile" not in config:
+        config.add_section("keyfile")
+    if "unmanaged-devices" not in config["keyfile"]:
+        config["keyfile"]["unmanaged-devices"] = "interface:eth0;interface:usb0"
+
+    # Write back if changes were made
+    content = ""
+    for section in config.sections():
+        content += f"[{section}]\n"
+        for key, value in config[section].items():
+            content += f"{key}={value}\n"
+        content += "\n"
+
+    run_command(f"echo '{content}' | sudo tee {file_path}", check=False)
+    return True
+
+
+def check_available_space(required_mb: int) -> bool:
+    """Check if there is enough space in disk for the required megabytes"""
+    try:
+        stats = os.statvfs("/")
+        available_mb = stats.f_bavail * stats.f_frsize / (1024 * 1024)
+        return available_mb >= required_mb
+    except Exception as exception:
+        logger.error(f"Failed to check available space: {exception}")
+        return False
+
+
+def update_swap_size() -> bool:
+    """Updates the swap size if there is enough space available"""
+    logger.info("Checking and updating swap size...")
+
+    swap_conf_file = "/etc/dphys-swapfile"
+
+    if check_available_space(1300):
+        desired_size = 1024
+    elif check_available_space(800):
+        desired_size = 512
+    else:
+        logger.warning("Not enough space to increase swap size")
+        return False
+
+    try:
+        content = load_file(swap_conf_file)
+
+        match = re.search(r"^CONF_SWAPSIZE=(\d+)", content, re.MULTILINE)
+        if not match:
+            logger.error("Could not find CONF_SWAPSIZE in configuration")
+            return False
+
+        current_size = int(match.group(1))
+        if current_size >= desired_size:
+            logger.info(f"Current swap size ({current_size}MB) is already >= desired size ({desired_size}MB)")
+            return False
+
+        new_content = re.sub(r"^CONF_SWAPSIZE=\d+", f"CONF_SWAPSIZE={desired_size}", content, flags=re.MULTILINE)
+
+        backup_identifier = "before_update_swap"
+        save_file(swap_conf_file, new_content, backup_identifier)
+
+        logger.info(f"Updated swap size from {current_size}MB to {desired_size}MB")
+        return True
+
+    except Exception as exception:
+        logger.error(f"Failed to update swap size: {exception}")
+        return False
 
 
 def main() -> int:
@@ -465,30 +694,44 @@ def main() -> int:
 
     # TODO: parse tag as semver and check before applying patches
     patches_to_apply = [
-        update_startup,
-        ensure_user_data_structure_is_in_place,
-        ensure_nginx_permissions,
-        create_dns_conf_host_link,
-        fix_ssh_ownership,
+        ("startup", update_startup),
+        ("userdata", ensure_user_data_structure_is_in_place),
+        ("nginx", ensure_nginx_permissions),
+        ("dns", create_dns_conf_host_link),
+        ("ssh", fix_ssh_ownership),
+        ("noIPV6", ensure_ipv6_disabled),
+        ("swap", update_swap_size),
+        ("cgroups", update_cgroups),
     ]
 
-    # this will always be pi4 as pi5 is not supported
-    if host_os == HostOs.Bullseye:
-        patches_to_apply.extend([update_navigator_overlays])
-
-    if host_cpu == CpuType.PI4 or CpuType.PI5:
+    if host_cpu == CpuType.PI3:
         patches_to_apply.extend(
             [
-                update_cgroups,
-                update_dwc2,
+                ("revert_update_dwc2", revert_update_dwc2),
+                ("clean_config_pi3", clean_config_pi3),
             ]
         )
 
-    logger.info("The following patches will be applied if needed:")
-    for patch in patches_to_apply:
-        logger.info(patch.__name__)
+    if host_cpu == CpuType.PI4:
+        patches_to_apply.extend([("navigator", update_navigator_overlays)])
 
-    patches_requiring_restart = [patch.__name__ for patch in patches_to_apply if patch()]
+    if host_cpu in [CpuType.PI4, CpuType.PI5]:
+        patches_to_apply.extend(
+            [
+                ("dwc2", update_dwc2),
+                ("i2c4", update_i2c4_symlink),
+            ]
+        )
+    if host_os == HostOs.Bookworm:
+        patches_to_apply.extend([("wpa", fix_wpa_service), ("networkmanager", configure_network_manager)])
+
+    logger.info("The following patches will be applied if needed:")
+    for name, patch in patches_to_apply:
+        logger.info(f"{name} {'(suppressed)' if name in disabled_patches else '(enabled)'}")
+
+    enabled_patches = [(name, patch) for name, patch in patches_to_apply if name not in disabled_patches]
+
+    patches_requiring_restart = [name for name, patch in enabled_patches if patch()]
     if patches_requiring_restart:
         logger.warning("The system will restart in 10 seconds because the following applied patches required restart:")
         for patch in patches_requiring_restart:

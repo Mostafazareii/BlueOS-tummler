@@ -2,7 +2,9 @@ import vue from '@vitejs/plugin-vue2'
 import { VuetifyResolver } from 'unplugin-vue-components/resolvers'
 import Components from 'unplugin-vue-components/vite'
 import { defineConfig, loadEnv } from 'vite'
+import { sentryVitePlugin } from "@sentry/vite-plugin";
 import { VitePWA } from 'vite-plugin-pwa'
+import wasm from "vite-plugin-wasm"
 const { name } = require('./package.json')
 
 process.env.PROJECT_NAME = name
@@ -21,6 +23,7 @@ export default defineConfig(({ command, mode }) => {
   return {
     plugins: [
       vue(),
+      wasm(),
       VitePWA({
         registerType: 'autoUpdate',
         devOptions: {
@@ -49,6 +52,11 @@ export default defineConfig(({ command, mode }) => {
         // Vue version of project.
         version: 2.7,
       }),
+      sentryVitePlugin({
+        authToken: process.env.SENTRY_AUTH_TOKEN,
+        org: "blue-robotics-c7",
+        project: "blueos",
+      })
     ],
     assetsInclude: ['**/*.gif', '**/*.glb', '**/*.png', '**/*.svg', '**/assets/ArduPilot-Parameter-Repository**.json'],
     resolve: {
@@ -58,6 +66,8 @@ export default defineConfig(({ command, mode }) => {
       },
     },
     build: {
+      sourcemap: true,
+      target: 'esnext',
       rollupOptions: {
         input: {
           main: path.resolve(__dirname, 'index.html'),
@@ -93,6 +103,9 @@ export default defineConfig(({ command, mode }) => {
           target: SERVER_ADDRESS,
         },
         '^/docker': {
+          target: SERVER_ADDRESS,
+        },
+        '^/extensionv2': {
           target: SERVER_ADDRESS,
         },
         '^/file-browser': {
@@ -172,6 +185,14 @@ export default defineConfig(({ command, mode }) => {
         },
         '^/wifi-manager': {
           target: SERVER_ADDRESS,
+        },
+        '^/zenoh': {
+          target: SERVER_ADDRESS,
+        },
+        '^/zenoh-api': {
+          target: SERVER_ADDRESS,
+          changeOrigin: true,
+          ws: true,
         },
       },
     },

@@ -2,11 +2,11 @@
 
 # Detect and configure hardware for each supported plataform
 VERSION="${VERSION:-master}"
-GITHUB_REPOSITORY=${GITHUB_REPOSITORY:-bluerobotics/blueos-docker}
+GITHUB_REPOSITORY=${GITHUB_REPOSITORY:-bluerobotics/BlueOS}
 REMOTE="${REMOTE:-https://raw.githubusercontent.com/${GITHUB_REPOSITORY}}"
 ROOT="$REMOTE/$VERSION"
 CONFIGURE_BOARD_PATH="$ROOT/install/boards"
-alias curl="curl --retry 6 --max-time 15 --retry-all-errors"
+alias curl="curl --retry 6 --max-time 15 --retry-all-errors --retry-delay 20 --connect-timeout 60"
 
 function board_not_detected {
     echo "Hardware not identified in $1, please report back the following line:"
@@ -31,6 +31,9 @@ if [ -f "/proc/device-tree/model" ]; then
     elif [[ $CPU_MODEL =~ (Raspberry\ Pi\ [4])|(Raspberry\ Pi\ Compute\ Module\ 4.*) ]]; then
         echo "Detected BCM27XX via device tree"
         curl -fsSL $CONFIGURE_BOARD_PATH/bcm_27xx.sh | bash
+    elif [[ $CPU_MODEL =~ Raspberry\ Pi\ 5 ]]; then
+        echo "Detected Raspberry Pi 5 via device tree"
+        curl -fsSL $CONFIGURE_BOARD_PATH/bcm_2712.sh | bash
     else
         board_not_detected "/proc/device-tree/model" "$CPU_MODEL"
     fi
