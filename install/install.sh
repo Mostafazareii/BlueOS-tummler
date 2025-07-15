@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 
 # Set desired version to be installed
+export DOCKER_USER=mammadomosi
 VERSION="${VERSION:-Atlas}"
 GITHUB_REPOSITORY=${GITHUB_REPOSITORY:-Mostafazareii/BlueOS-tummler}
 DOCKER_USER=${DOCKER_USER:-$(echo $GITHUB_REPOSITORY | cut -d'/' -f1)}
